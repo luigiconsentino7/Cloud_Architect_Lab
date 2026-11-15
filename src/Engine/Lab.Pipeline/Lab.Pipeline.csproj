@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Lab.Scoring/Lab.Scoring.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,35 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+*.received.*
+artifacts/
+
+# App data (dev)
+*.db
+*.db-shm
+*.db-wal
+.lab-data/
+
+# Exports for Claude Code reviews
+exports/
+
+# Node / Angular
+node_modules/
+web/dist/
+web/.angular/
+web/coverage/
+npm-debug.log*
+
+# Published SPA inside the host
+src/Lab.App/wwwroot/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

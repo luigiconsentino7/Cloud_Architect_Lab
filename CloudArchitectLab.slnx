@@ -1,0 +1,23 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lab.Ai/Lab.Ai.csproj" />
+    <Project Path="src/Lab.App/Lab.App.csproj" />
+    <Project Path="src/Lab.Cli/Lab.Cli.csproj" />
+    <Project Path="src/Lab.Content/Lab.Content.csproj" />
+    <Project Path="src/Lab.Modules/Lab.Modules.csproj" />
+  </Folder>
+  <Folder Name="/src/Engine/">
+    <Project Path="src/Engine/Lab.Cost/Lab.Cost.csproj" />
+    <Project Path="src/Engine/Lab.Ir/Lab.Ir.csproj" />
+    <Project Path="src/Engine/Lab.Pipeline/Lab.Pipeline.csproj" />
+    <Project Path="src/Engine/Lab.Rules/Lab.Rules.csproj" />
+    <Project Path="src/Engine/Lab.Scoring/Lab.Scoring.csproj" />
+    <Project Path="src/Engine/Lab.Simulation/Lab.Simulation.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lab.App.Tests/Lab.App.Tests.csproj" />
+    <Project Path="tests/Lab.Architecture.Tests/Lab.Architecture.Tests.csproj" />
+    <Project Path="tests/Lab.Content.Tests/Lab.Content.Tests.csproj" />
+    <Project Path="tests/Lab.Engine.Tests/Lab.Engine.Tests.csproj" />
+  </Folder>
+</Solution>
