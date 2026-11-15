@@ -11,7 +11,7 @@ public sealed record Design(JsonObject Scene, IReadOnlyList<FlowDefinition> Flow
 /// <summary>Desafio "Envio de PIX" (o exemplo ponta a ponta da spec) e dois desenhos: um sólido e um com defeitos clássicos.</summary>
 public static class Pix
 {
-    public static ChallengeSpec Challenge(CloudProvider provider = CloudProvider.Aws, double baselineRps = 1500) => new()
+    public static ChallengeSpec Challenge(CloudProvider provider = CloudProvider.Aws, double baselineRps = 1000) => new()
     {
         Id = "chl_test_pix",
         SeedId = "pix/envio-pix",
@@ -42,7 +42,7 @@ public static class Pix
         ],
         ExternalSystems =
         [
-            new ExternalSystemSpec { Id = "external:spi", Name = "SPI (BACEN)", Latency = new LatencyDist(120, 400), Availability = 0.9995, Idempotent = true, SideEffect = true },
+            new ExternalSystemSpec { Id = "external:spi", Name = "SPI (BACEN)", Latency = new LatencyDist(250, 800), Availability = 0.9999, Idempotent = true, SideEffect = true, Monetary = true },
             new ExternalSystemSpec { Id = "external:push", Name = "Provedor de push", Latency = new LatencyDist(80, 300), Availability = 0.999, Idempotent = false, SideEffect = true },
         ],
         Workload = new WorkloadSpec
@@ -50,8 +50,8 @@ public static class Pix
             BaselineRps = baselineRps,
             Mix = new Dictionary<string, UseCaseLoad>
             {
-                ["UC-1"] = new() { Share = 0.6, ComputeCostMs = new LatencyDist(4, 15) },
-                ["UC-2"] = new() { Share = 0.4, ComputeCostMs = new LatencyDist(1, 4) },
+                ["UC-1"] = new() { Share = 0.8, ComputeCostMs = new LatencyDist(4, 15) },
+                ["UC-2"] = new() { Share = 0.2, ComputeCostMs = new LatencyDist(1, 4) },
             },
             Cacheability = new Dictionary<string, double> { ["UC-2"] = 0.7 },
         },
@@ -59,16 +59,16 @@ public static class Pix
         {
             Scenarios =
             [
-                new ScenarioSpec { Id = "baseline", Kind = ScenarioKind.Load, Load = new LoadProfile { Rps = baselineRps, Duration = 60, Warmup = 10 } },
+                new ScenarioSpec { Id = "baseline", Kind = ScenarioKind.Load, Load = new LoadProfile { Rps = baselineRps, Duration = 30, Warmup = 10 } },
                 new ScenarioSpec
                 {
                     Id = "payday-peak", Kind = ScenarioKind.Load,
-                    Load = new LoadProfile { Profile = LoadShape.Ramp, FromRps = baselineRps, ToRps = baselineRps * 5, RampFor = 30, HoldFor = 60, Warmup = 10 },
+                    Load = new LoadProfile { Profile = LoadShape.Ramp, FromRps = baselineRps, ToRps = baselineRps * 5, RampFor = 15, HoldFor = 30, Warmup = 10 },
                 },
                 new ScenarioSpec
                 {
                     Id = "spi-slow", Kind = ScenarioKind.Chaos, Visibility = Visibility.Hidden, Load = new LoadProfile { Ref = "baseline" },
-                    Faults = [new FaultSpec { Type = FaultType.LatencyInjection, Target = "external:spi", AddMs = new LatencyDist(800, 3000), At = 15, For = 30 }],
+                    Faults = [new FaultSpec { Type = FaultType.LatencyInjection, Target = "external:spi", AddMs = new LatencyDist(800, 3000), At = 12, For = 25 }],
                 },
                 new ScenarioSpec
                 {
@@ -97,7 +97,7 @@ public static class Pix
         var gw = s.Component("aws.apigateway", "API PIX", id: "gw", config: new { auth = "jwt", waf = true, throttle = new { rps = 20000, burst = 10000 } });
         var svc = s.Component("aws.ecs-fargate", "pix-service", id: "svc", config: new
         {
-            instances = new { min = 6, max = 40 }, vcpu = 1, concurrencyPerInstance = 64, zones = new[] { "a", "b", "c" },
+            instances = new { min = 15, max = 40 }, vcpu = 2, concurrencyPerInstance = 200, zones = new[] { "a", "b", "c" },
             observability = new { metrics = true, logs = true, tracing = true, alarms = true },
         });
         var db = s.Component("aws.aurora-postgresql", "ledger", id: "db", config: new { instanceClass = "xlarge", multiAz = true, readReplicas = 1 });
@@ -107,24 +107,25 @@ public static class Pix
         var pending = s.Component("aws.sqs", "pendencias", id: "pending", config: new { dlq = new { enabled = true, maxReceiveCount = 5 }, observability = new { alarms = true } });
         var notifier = s.Component("aws.lambda", "notificador", id: "notifier", config: new
         {
-            reservedConcurrency = 200, idempotency = new { enabled = true, storeNodeId = "db" },
+            reservedConcurrency = 800, idempotency = new { enabled = true, storeNodeId = "dedupe" },
             observability = new { metrics = true, logs = true, tracing = true },
         });
         s.Component("external.system", "Push", id: "push_box", externalId: "external:push");
+        var dedupe = s.Component("aws.dynamodb", "dedupe-notificacoes", id: "dedupe");
 
         s.Arrow(app, waf, id: "e01", config: new { idempotencyKey = true });
         s.Arrow(waf, gw, id: "e02");
-        s.Arrow(gw, svc, id: "e03", config: new { timeoutMs = 900 });
+        s.Arrow(gw, svc, id: "e03", config: new { timeoutMs = 950 });
         s.Arrow(svc, db, id: "e04", config: new { ops = new[] { new { op = "transaction", count = 1 } } });
         s.Arrow(svc, "external:spi", id: "e05", config: new
         {
-            timeoutMs = 450, retries = new { max = 1, backoff = "exponential-jitter", baseMs = 50 },
+            timeoutMs = 700,
             circuitBreaker = new { enabled = true, errorRateThreshold = 0.5, openMs = 20000 },
         });
         s.Arrow(svc, pending, id: "e06", config: new { trigger = "on-failure", triggerOf = "e05", delivery = "outbox" });
         s.Arrow(svc, events, id: "e07", config: new { delivery = "outbox" });
         s.Arrow(events, notifier, id: "e08", config: new { batchSize = 10 });
-        s.Arrow(notifier, db, id: "e09", config: new { ops = new[] { new { op = "conditional-write", count = 1 } } });
+        s.Arrow(notifier, dedupe, id: "e09", config: new { ops = new[] { new { op = "conditional-write", count = 1 } } });
         s.Arrow(notifier, "external:push", id: "e10", config: new { timeoutMs = 1000 });
         s.Arrow(svc, cache, id: "e11", config: new { ops = new[] { new { op = "read", count = 1 } } });
         s.Arrow(svc, db, id: "e12", config: new { trigger = "on-cache-miss", triggerOf = "e11", ops = new[] { new { op = "read", count = 1 } } });

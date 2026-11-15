@@ -65,6 +65,9 @@ public sealed record ExternalSystemSpec
 
     /// <summary>A chamada produz efeito observável (transferência, notificação) e entra na contagem de integridade.</summary>
     public bool SideEffect { get; init; }
+
+    /// <summary>O efeito movimenta dinheiro (ex.: transferência no SPI), não só informa (ex.: push).</summary>
+    public bool Monetary { get; init; }
 }
 
 public sealed record UseCaseLoad
