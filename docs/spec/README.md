@@ -6,6 +6,7 @@
 | **Data** | 15/11/2026 |
 | **Requisitos fixos** | Backend em .NET · **nenhum custo recorrente obrigatório** |
 | **Demais tecnologias** | Propostas com alternativas e justificativas, abertas a questionamento (ver [ADRs](03-arquitetura.md#decisões-de-arquitetura-adrs)) |
+| **Máquina de referência** | 16 GB de RAM, NVIDIA RTX 3050 Laptop (4 GB de VRAM); uso só no desktop |
 
 ## Resumo em uma página
 
@@ -30,15 +31,15 @@ O Cloud Architect Lab é um app de estudo de System Design para quem trabalha no
 | Tema | Proposta | Principal alternativa | Por quê |
 |---|---|---|---|
 | Backend | .NET 10 LTS, ASP.NET Core, monólito modular em **processo único** (API + worker em background) | API e worker separados; microsserviços | Um usuário, uma máquina, um desenvolvedor; fronteiras de módulo permitem separar depois |
-| Frontend | React + TypeScript + Vite, servido pelo próprio app .NET | Blazor | O canvas pedido é o próprio Excalidraw, um componente React |
+| Frontend | Angular + TypeScript, servido pelo próprio app .NET; o Excalidraw roda como "ilha" React dentro de um componente Angular | React no app inteiro; Blazor | Sua escolha; a ilha React fica isolada atrás de um adaptador |
 | Canvas | Excalidraw (MIT) + camada semântica via `customData` | React Flow (editor de grafo) | Preserva o desenho livre e ainda gera um grafo tipado e testável |
 | Avaliação | Simulação determinística + regras + revisão gerada a partir de textos curados | Só LLM; infraestrutura real | Reprodutível, rápido, offline e gratuito |
 | Modelo do desenho | Grafo intermediário (IR) agnóstico de provedor, baseado em arquétipos; catálogo como dados | Um motor por provedor | Novo serviço ou provedor = um arquivo YAML |
 | IA de autoria | Claude Code (incluído no Pro) cria e valida o conteúdo no repositório | Gerar tudo em tempo de execução | Melhor qualidade, uso permitido do plano, zero custo extra |
-| IA em execução | Plugável: `none` (padrão) · `ollama` (local, grátis) · `anthropic` (Claude API, opt-in com teto) | Plano Pro como backend | O plano Pro não pode ser backend; o app não depende de IA para funcionar |
+| IA em execução | Plugável: `ollama` com modelo de 3–4B na sua GPU (o padrão na sua máquina) · `none` (sempre disponível) · `anthropic` (Claude API, opt-in com teto) | Plano Pro como backend | O plano Pro não pode ser backend; o app não depende de IA para funcionar |
 | Banco | SQLite + EF Core 10 (um arquivo) | PostgreSQL | Zero instalação; migra para PostgreSQL se um dia for para a nuvem |
 | Jobs | Fila em processo (`Channel<T>`) persistida no SQLite | Hangfire, RabbitMQ | Sem dependências |
-| Execução | Local (`dotnet run` ou executável único); acesso remoto opcional via Cloudflare Tunnel + Access | Nuvem com free tier; Cloudflare Containers | Custo zero; o backend .NET não roda no plano gratuito do Cloudflare |
+| Execução | Local, só no desktop: executável único que abre o navegador | Nuvem com free tier; Cloudflare | Custo zero absoluto, sem domínio nem túnel; o backend .NET não roda no plano gratuito do Cloudflare |
 | Futuro | Versão 100% estática no Cloudflare Pages com o motor C# compilado para WebAssembly | — | Hospedagem gratuita sem servidor |
 
 ## Documentos
@@ -72,6 +73,15 @@ O Cloud Architect Lab é um app de estudo de System Design para quem trabalha no
 | **Avaliação** | Execução do pipeline sobre um snapshot da tentativa: achados, resultados de cenários, custo, revisão e nota |
 | **Manifesto** | Versões e sementes que tornam uma avaliação reprodutível |
 
+## Decisões confirmadas
+
+| Data | Tema | Decisão | Onde está na spec |
+|---|---|---|---|
+| 15/11/2026 | Custo | Nenhum custo extra; o plano Pro não pode ser o backend de IA | [06 — IA](06-ia.md) |
+| 15/11/2026 | Frontend (Q2) | Angular | [ADR-002](03-arquitetura.md#adr-002--angular-com-o-excalidraw-como-ilha-react) e [integração do canvas](04-canvas-catalogo-e-ir.md#integração-com-o-angular) |
+| 15/11/2026 | Hardware (Q3) | 16 GB de RAM, RTX 3050 Laptop com 4 GB de VRAM | IA local com modelo de 3–4B inteiro na GPU ([06](06-ia.md#ollama-local-grátis)) |
+| 15/11/2026 | Acesso (Q4) | Só no desktop, por enquanto | Sem túnel, domínio nem login ([ADR-009](03-arquitetura.md#adr-009--local-first-só-no-desktop)) |
+
 ## Perguntas em aberto
 
 Estas decisões mudam escopo ou experiência e são suas. Enquanto não houver resposta, vale a proposta indicada.
@@ -79,9 +89,6 @@ Estas decisões mudam escopo ou experiência e são suas. Enquanto não houver r
 | # | Pergunta | Proposta atual |
 |---|---|---|
 | Q1 | O app é só para você ou terá outros usuários (amigos, colegas, ranking)? | Só você. Outros usuários reabririam a questão de custo (hospedagem e IA) |
-| Q2 | Frontend em React ou Blazor? | React ([ADR-002](03-arquitetura.md#adr-002--react--typescript-em-vez-de-blazor)). Se preferir .NET de ponta a ponta, a alternativa é Blazor com o canvas como "ilha" React |
-| Q3 | Qual é o seu computador (sistema operacional, RAM, GPU ou Apple Silicon)? | Define se o chat com IA local (Ollama) é viável. Sem isso, o app usa o modo sem IA, que cobre todo o loop |
-| Q4 | Você quer acessar o app pelo celular ou fora de casa? | Opcional, via Cloudflare Tunnel + Access (grátis), mas um endereço fixo exige um domínio (~US$ 10/ano), o único custo possível. Sem acesso remoto, custo zero absoluto |
 | Q5 | MVP com as três nuvens ou começar por uma? | As três + Genérico, com catálogo enxuto (~15 serviços cada): o motor trabalha por arquétipo, então cada provedor é só dados |
 | Q6 | Se um dia aceitar pagar pela Claude API (~US$ 9/mês na estimativa de [06](06-ia.md)), quer o adaptador pronto? | Sim, implementado na Fase 2 e desligado por padrão, com teto de gasto obrigatório |
 | Q7 | Manter no roadmap o "Sandbox real" (emuladores locais + k6) e a versão estática no Cloudflare Pages? | Sim, ambos opcionais (Fases 4 e 5) |

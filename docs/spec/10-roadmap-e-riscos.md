@@ -6,10 +6,10 @@ Durações em semanas de dedicação integral, estimativa grosseira. Em tempo pa
 
 | Spike | O que provar | Critério de saída |
 |---|---|---|
-| **S1** Canvas semântico | Excalidraw em React com paleta (5 serviços AWS), `customData`, setas vinculadas, inspector; compilação cena → IR no backend | 6 componentes + 6 setas geram a IR correta (teste de snapshot); "Redis" desenhado à mão gera a sugestão de mapeamento |
+| **S1** Canvas semântico no Angular | Excalidraw como ilha React num componente Angular; paleta e inspector em Angular (5 serviços AWS); `customData`, setas vinculadas; compilação cena → IR no backend | 6 componentes + 6 setas geram a IR correta (teste de snapshot); "Redis" desenhado à mão gera a sugestão de mapeamento; arrastar com 150 elementos na cena continua fluido, sem detecção de mudanças do Angular a cada evento de ponteiro |
 | **S2** Motor de simulação | Núcleo de eventos discretos + testes golden + 1 cenário de carga num grafo de 5 nós | Erro < 3% contra a teoria; ≥ 2 milhões de eventos/s por núcleo; determinismo por semente. Decide entre motor próprio e SimSharp (MIT) como base |
 | **S3** Fábrica de desafios | Schema da semente + `lab challenge validate` + skill `novo-desafio`, usando o Claude Code | 3 sementes criadas com o Claude Code passam no validador, com a referência rodando no motor do S2 |
-| **S4** IA local | Ollama com 2–3 modelos candidatos no seu hardware: delta de personalização e entrevistador | ≥ 80% de deltas válidos de primeira; primeiro token ≤ 5 s. Se nenhum modelo passar, o MVP sai com `none` e ponte manual |
+| **S4** IA local | Ollama no seu notebook (RTX 3050 Laptop, 4 GB): 2–3 modelos de 3–4B inteiros na GPU + 1 de 7–8B como referência; delta de personalização, entrevistador e narrativa | ≥ 80% de deltas aprovados no validador de primeira; primeiro token ≤ 3 s e ≥ 15 tokens/s no modelo padrão. Se nenhum passar, o MVP sai com `none` e a ponte manual com o claude.ai sobe para o MVP |
 
 Também na Fase 0: solução .NET, estrutura de módulos, testes de arquitetura, CI e o esqueleto do frontend.
 
@@ -24,7 +24,7 @@ Também na Fase 0: solução .NET, estrutura de módulos, testes de arquitetura,
 - Entrevistador com esclarecimentos e dicas curados (chat livre com Ollama, se disponível).
 - XP, níveis, radar de competências, 10 conquistas.
 - `lab export` + skill `revisar-avaliacao`.
-- Executável único para Windows, macOS e Linux; backup automático.
+- Executável único para Windows, macOS e Linux, que abre o navegador ao iniciar; backup automático.
 
 ### Backlog do MVP (em ordem)
 
@@ -59,7 +59,6 @@ Também na Fase 0: solução .NET, estrutura de módulos, testes de arquitetura,
 - Fronteiras de rede e regras SEC completas.
 - Ponte manual com o claude.ai.
 - Adaptador Claude API (opt-in, teto obrigatório) — implementado e desligado por padrão.
-- Modo remoto com Cloudflare Tunnel + Access.
 - Testes do motor em WebAssembly no CI.
 
 ## Fase 3 — Modos (3–4 semanas)
@@ -78,6 +77,11 @@ IR → `docker-compose` com emuladores; carga com k6 ou NBomber; falhas com Toxi
 
 Motor compilado para WebAssembly (AOT), conteúdo embutido, dados no IndexedDB, exportação/importação; hospedagem gratuita em `*.pages.dev`.
 
+## Futuro, sob demanda
+
+- **Acesso pelo celular:** Cloudflare Tunnel + Access (grátis) + domínio (~US$ 10/ano) e `RemoteMode` no app ([03](03-arquitetura.md#acesso-remoto-fora-do-escopo-por-enquanto)).
+- **Outros usuários ou ranking:** reabre as decisões de hospedagem, autenticação e custo de IA.
+
 ## Riscos
 
 | # | Risco | Prob. | Impacto | Mitigação |
@@ -87,10 +91,11 @@ Motor compilado para WebAssembly (AOT), conteúdo embutido, dados no IndexedDB, 
 | R3 | Escopo grande para uma pessoa | Alta | Alto | Fases jogáveis; o MVP é o loop completo com profundidade mínima |
 | R4 | Sementes impossíveis ou triviais | Média | Alto | Validador roda a referência nos cantos da variação; faixas por dificuldade; revisão humana do diff |
 | R5 | Esforço de autoria da biblioteca | Média | Médio | Fábrica de desafios com Claude Code + validador; começar com 12 sementes e crescer por trilha |
-| R6 | Modelo local fraco ou hardware insuficiente | Média | Médio | O modo `none` cobre todo o loop; delta pequeno em vez de documento inteiro; evals no S4; ponte manual com o claude.ai |
+| R6 | Modelo local fraco: com 4 GB de VRAM, só modelos de 3–4B rodam inteiros na GPU | Média | Médio | O modo `none` cobre todo o loop; delta pequeno em vez de documento inteiro; JSON restrito por gramática; evals no S4; ponte manual com o claude.ai |
 | R7 | Fricção de tipar componentes tira a liberdade do desenho | Média | Médio | Mapeamento em 1 clique; anotações livres continuam valendo; problemas explicam o que falta |
 | R8 | Excalidraw muda API ou formato | Baixa | Médio | Versão fixada; adaptador; testes de snapshot |
 | R9 | Uso indevido da assinatura (automatizar o plano Pro no backend) | Baixa | Alto | Proibido pela arquitetura (ADR-007): o app nunca chama Claude Code nem credenciais do plano; Claude só via chave de API, opt-in |
 | R10 | Custo inesperado | Baixa | Médio | Nada pago no caminho padrão; Claude API desligada e com teto; nenhuma nuvem com cartão de crédito |
 | R11 | Vazamento de dados do empregador | Baixa | Alto | Modo local por padrão; aviso; mascaramento quando algo sai da máquina |
 | R12 | Termos de uso de ícones e marcas | Baixa | Baixo | Uso pessoal; revisar os termos antes de publicar; ícones genéricos como alternativa |
+| R13 | Integração Angular ↔ React (ilha do Excalidraw) frágil ou lenta | Média | Médio | Adaptador fino e tipado como única fronteira; versões fixadas; React fora da detecção de mudanças do Angular; spike S1; testes E2E do canvas |

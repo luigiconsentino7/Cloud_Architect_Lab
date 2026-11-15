@@ -1,6 +1,6 @@
 # 02 — Requisitos
 
-Fases: **MVP** (Fase 1), **F2**, **F3**, **F4**, **F5** — ver [10 — Roadmap](10-roadmap-e-riscos.md).
+Fases: **MVP** (Fase 1), **F2**, **F3**, **F4**, **F5** e **Futuro** (sem data) — ver [10 — Roadmap](10-roadmap-e-riscos.md).
 
 ## Requisitos funcionais
 
@@ -108,7 +108,8 @@ Fases: **MVP** (Fase 1), **F2**, **F3**, **F4**, **F5** — ver [10 — Roadmap]
 | RF-IA-03 | Indicador do modo de IA ativo na interface | MVP |
 | RF-IA-04 | Adaptador Claude API desligado por padrão; para ligar, exige chave em segredo local e teto mensal de gasto > 0; bloqueia ao atingir o teto | F2 |
 | RF-CFG-01 | Backup automático diário do banco (7 cópias) e exportação/importação completa em JSON | MVP |
-| RF-CFG-02 | Modo remoto opcional (Cloudflare Tunnel + Access) com validação do token do Access | F2 |
+| RF-CFG-02 | Ao iniciar, o executável abre o navegador padrão no endereço do app | MVP |
+| RF-CFG-03 | Acesso remoto (ex.: Cloudflare Tunnel + Access, com validação do token do Access) | Futuro |
 
 ## Requisitos não funcionais
 
@@ -116,14 +117,14 @@ Fases: **MVP** (Fase 1), **F2**, **F3**, **F4**, **F5** — ver [10 — Roadmap]
 |---|---|---|---|
 | RNF-01 | Desempenho | Validação ao vivo (compilação + regras) | ≤ 300 ms p95, grafos de até 60 nós |
 | RNF-02 | Desempenho | Pipeline completo, conjunto padrão de cenários | ≤ 30 s p95 em 4 núcleos, pico de até 5 mil req/s, 60 nós |
-| RNF-03 | Desempenho | Chat com IA local | primeiro token ≤ 5 s com o modelo escolhido no spike S4 |
+| RNF-03 | Desempenho | Chat com IA local na máquina de referência (16 GB de RAM, RTX 3050 Laptop com 4 GB) | primeiro token ≤ 3 s e ≥ 15 tokens/s com o modelo padrão (3–4B inteiro na GPU), a confirmar no spike S4 |
 | RNF-04 | Reprodutibilidade | Mesmo manifesto ⇒ mesmos resultados e mesma nota, byte a byte | 100% |
 | RNF-05 | Custo | Custo recorrente obrigatório | **zero**: nenhuma dependência paga no caminho padrão |
 | RNF-06 | Offline | Loop completo sem internet nos modos `none` e `ollama` | 100% |
 | RNF-07 | Privacidade | Nos modos `none` e `ollama`, nenhum dado sai da máquina | 100% |
 | RNF-08 | Instalação | Rodar com .NET SDK ou executável único, sem Docker obrigatório | `dotnet run` ou 1 arquivo |
 | RNF-09 | Durabilidade | Autosave sem perda de mais de 5 s de trabalho; backup diário | — |
-| RNF-10 | Segurança | Escuta só em loopback no modo local; proteção contra DNS rebinding (validação do Host); no modo remoto, nenhuma requisição sem token válido do Cloudflare Access | — |
+| RNF-10 | Segurança | Escuta só em loopback; validação do `Host` contra DNS rebinding; requisições que alteram estado exigem header próprio e `Origin` do app (CSRF a partir de outros sites abertos no navegador) | — |
 | RNF-11 | Observabilidade | Traces, métricas e logs OpenTelemetry por etapa do pipeline; eventos/s da simulação | — |
 | RNF-12 | Extensibilidade | Novo serviço de um arquétipo existente = só YAML; nova semente = só YAML | — |
 | RNF-13 | Manutenibilidade | Fronteiras de módulos verificadas por testes de arquitetura; cobertura do motor ≥ 85% | — |
