@@ -36,7 +36,7 @@ O Cloud Architect Lab é um app de estudo de System Design para quem trabalha no
 | Avaliação | Simulação determinística + regras + revisão gerada a partir de textos curados | Só LLM; infraestrutura real | Reprodutível, rápido, offline e gratuito |
 | Modelo do desenho | Grafo intermediário (IR) agnóstico de provedor, baseado em arquétipos; catálogo como dados | Um motor por provedor | Novo serviço ou provedor = um arquivo YAML |
 | IA de autoria | Claude Code (incluído no Pro) cria e valida o conteúdo no repositório | Gerar tudo em tempo de execução | Melhor qualidade, uso permitido do plano, zero custo extra |
-| IA em execução | Plugável: `ollama` com modelo de 3–4B na sua GPU (o padrão na sua máquina) · `none` (sempre disponível) · `anthropic` (Claude API, opt-in com teto) | Plano Pro como backend | O plano Pro não pode ser backend; o app não depende de IA para funcionar |
+| IA em execução | Plugável: `ollama` com modelo de 3–4B na sua GPU (o padrão na sua máquina) · `none` (sempre disponível) · `anthropic` (Claude API; futuro, opt-in com teto) | Plano Pro como backend | O plano Pro não pode ser backend; o app não depende de IA para funcionar |
 | Banco | SQLite + EF Core 10 (um arquivo) | PostgreSQL | Zero instalação; migra para PostgreSQL se um dia for para a nuvem |
 | Jobs | Fila em processo (`Channel<T>`) persistida no SQLite | Hangfire, RabbitMQ | Sem dependências |
 | Execução | Local, só no desktop: executável único que abre o navegador | Nuvem com free tier; Cloudflare | Custo zero absoluto, sem domínio nem túnel; o backend .NET não roda no plano gratuito do Cloudflare |
@@ -81,6 +81,7 @@ O Cloud Architect Lab é um app de estudo de System Design para quem trabalha no
 | 15/11/2026 | Frontend (Q2) | Angular | [ADR-002](03-arquitetura.md#adr-002--angular-com-o-excalidraw-como-ilha-react) e [integração do canvas](04-canvas-catalogo-e-ir.md#integração-com-o-angular) |
 | 15/11/2026 | Hardware (Q3) | 16 GB de RAM, RTX 3050 Laptop com 4 GB de VRAM | IA local com modelo de 3–4B inteiro na GPU ([06](06-ia.md#ollama-local-grátis)) |
 | 15/11/2026 | Acesso (Q4) | Só no desktop, por enquanto | Sem túnel, domínio nem login ([ADR-009](03-arquitetura.md#adr-009--local-first-só-no-desktop)) |
+| 15/11/2026 | IA em execução (Q6) | Ollama por enquanto; Claude API e integração com o Claude Desktop via MCP ficam para o futuro. Validação, testes e nota nunca usam IA | [06 — IA](06-ia.md#camada-3--execução-com-ia-opcional) |
 
 ## Perguntas em aberto
 
@@ -90,6 +91,5 @@ Estas decisões mudam escopo ou experiência e são suas. Enquanto não houver r
 |---|---|---|
 | Q1 | O app é só para você ou terá outros usuários (amigos, colegas, ranking)? | Só você. Outros usuários reabririam a questão de custo (hospedagem e IA) |
 | Q5 | MVP com as três nuvens ou começar por uma? | As três + Genérico, com catálogo enxuto (~15 serviços cada): o motor trabalha por arquétipo, então cada provedor é só dados |
-| Q6 | Se um dia aceitar pagar pela Claude API (~US$ 9/mês na estimativa de [06](06-ia.md)), quer o adaptador pronto? | Sim, implementado na Fase 2 e desligado por padrão, com teto de gasto obrigatório |
 | Q7 | Manter no roadmap o "Sandbox real" (emuladores locais + k6) e a versão estática no Cloudflare Pages? | Sim, ambos opcionais (Fases 4 e 5) |
 | Q8 | Idioma do app | pt-BR. Inglês como opção na Fase 3, útil para entrevistas em inglês |

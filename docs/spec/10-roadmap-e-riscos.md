@@ -58,7 +58,6 @@ Também na Fase 0: solução .NET, estrutura de módulos, testes de arquitetura,
 - Trilhas, streak, recomendador, 25+ conquistas.
 - Fronteiras de rede e regras SEC completas.
 - Ponte manual com o claude.ai.
-- Adaptador Claude API (opt-in, teto obrigatório) — implementado e desligado por padrão.
 - Testes do motor em WebAssembly no CI.
 
 ## Fase 3 — Modos (3–4 semanas)
@@ -80,6 +79,7 @@ Motor compilado para WebAssembly (AOT), conteúdo embutido, dados no IndexedDB, 
 ## Futuro, sob demanda
 
 - **Acesso pelo celular:** Cloudflare Tunnel + Access (grátis) + domínio (~US$ 10/ano) e `RemoteMode` no app ([03](03-arquitetura.md#acesso-remoto-fora-do-escopo-por-enquanto)).
+- **IA com qualidade de Claude:** servidor MCP do app para o Claude Desktop (usa o seu Pro, sem custo extra) ou adaptador da Claude API (pago, com teto) — ver [06](06-ia.md#futuro-o-app-dentro-do-claude-desktop-mcp).
 - **Outros usuários ou ranking:** reabre as decisões de hospedagem, autenticação e custo de IA.
 
 ## Riscos

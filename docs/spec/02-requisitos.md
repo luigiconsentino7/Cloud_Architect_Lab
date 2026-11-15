@@ -84,6 +84,7 @@ Fases: **MVP** (Fase 1), **F2**, **F3**, **F4**, **F5** e **Futuro** (sem data) 
 | RF-AVA-13 | Manifesto de avaliação salvo; reavaliar o mesmo snapshot reproduz o resultado | MVP |
 | RF-AVA-14 | Solução de referência revelada após a submissão (MVP); diff estrutural com a tentativa (F2) | MVP |
 | RF-AVA-15 | Comparação entre tentativas (delta por dimensão e por SLO) | F2 |
+| RF-AVA-16 | Validar, Simular, Submeter, revisão e nota **nunca usam IA**, em nenhum modo; a IA só escreve a narrativa opcional | MVP |
 
 ### Gamificação (GAM)
 
@@ -106,7 +107,8 @@ Fases: **MVP** (Fase 1), **F2**, **F3**, **F4**, **F5** e **Futuro** (sem data) 
 | RF-IA-01 | Modo de IA configurável: `auto` (padrão: usa Ollama se estiver disponível, senão `none`), `none`, `ollama`, `anthropic` | MVP |
 | RF-IA-02 | **Todo o loop principal funciona no modo `none`** | MVP |
 | RF-IA-03 | Indicador do modo de IA ativo na interface | MVP |
-| RF-IA-04 | Adaptador Claude API desligado por padrão; para ligar, exige chave em segredo local e teto mensal de gasto > 0; bloqueia ao atingir o teto | F2 |
+| RF-IA-04 | Adaptador Claude API desligado por padrão; para ligar, exige chave em segredo local e teto mensal de gasto > 0; bloqueia ao atingir o teto | Futuro |
+| RF-IA-05 | Servidor MCP local para o Claude Desktop e o Claude Code: desafio público, desenho, Validar/Simular, proposta de desafio validada pelo motor e revisão em texto; nada oculto antes da submissão | Futuro |
 | RF-CFG-01 | Backup automático diário do banco (7 cópias) e exportação/importação completa em JSON | MVP |
 | RF-CFG-02 | Ao iniciar, o executável abre o navegador padrão no endereço do app | MVP |
 | RF-CFG-03 | Acesso remoto (ex.: Cloudflare Tunnel + Access, com validação do token do Access) | Futuro |

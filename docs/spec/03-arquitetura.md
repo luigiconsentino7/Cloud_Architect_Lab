@@ -244,7 +244,7 @@ Custos dessa opção: download do runtime .NET (alguns MB, depois em cache), sim
 ### ADR-007 — IA plugável com custo zero; Claude Code para autoria
 
 - **Contexto:** requisito de custo zero; o plano Pro não pode ser backend de aplicação (ver [06](06-ia.md)).
-- **Decisão:** (a) sementes, soluções de referência, dicas e textos das regras são criados em tempo de autoria com o Claude Code e validados pelo motor; (b) em execução, portas por papel com adaptadores `none` (padrão), `ollama` (local, grátis) e `anthropic` (Claude API, opt-in com teto de gasto).
+- **Decisão:** (a) sementes, soluções de referência, dicas e textos das regras são criados em tempo de autoria com o Claude Code e validados pelo motor; (b) em execução, portas por papel com adaptadores `none` (sempre disponível), `ollama` (local, grátis) e `anthropic` (Claude API, opt-in com teto de gasto). Decisão de 15/11/2026: começa com `ollama` + `none`; o adaptador `anthropic` e a integração com o Claude Desktop via MCP ficam para o futuro.
 - **Alternativas:** Claude API como padrão (melhor qualidade, ~US$ 9/mês estimados); free tiers de outras APIs de LLM (limites e termos variáveis); automatizar o Claude Code ou a assinatura a partir do backend (não é o caminho suportado pela Anthropic — descartado).
 - **Consequências:** o app nunca depende de IA para funcionar; a qualidade da conversa em execução depende do modelo local disponível.
 
