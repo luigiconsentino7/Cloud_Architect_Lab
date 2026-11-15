@@ -1,0 +1,93 @@
+# AWS — sobrescritas dos arquétipos. VALORES ILUSTRATIVOS (região sa-east-1); calibrar com a documentação oficial.
+provider: aws
+reviewedAt: "2026-11-15"
+components:
+  - { id: aws.route53, archetype: edge.dns, displayName: "Amazon Route 53", shortName: "Route 53", isDefault: true, aliases: [route 53, route53, dns], docs: "https://docs.aws.amazon.com/route53/" }
+  - { id: aws.cloudfront, archetype: edge.cdn, displayName: "Amazon CloudFront", shortName: CloudFront, isDefault: true, aliases: [cloudfront, cdn], docs: "https://docs.aws.amazon.com/cloudfront/" }
+  - { id: aws.waf, archetype: edge.waf, displayName: "AWS WAF", shortName: WAF, isDefault: true, aliases: [waf, aws waf, firewall], docs: "https://docs.aws.amazon.com/waf/" }
+  - id: aws.apigateway
+    archetype: edge.api-gateway
+    displayName: "Amazon API Gateway"
+    shortName: "API Gateway"
+    isDefault: true
+    aliases: [api gateway, apigateway, api gw, apigw, gateway]
+    performance: { maxRps: 10000, burst: 5000 }
+    docs: "https://docs.aws.amazon.com/apigateway/"
+  - { id: aws.alb, archetype: network.load-balancer, displayName: "Application Load Balancer", shortName: ALB, isDefault: true, aliases: [alb, application load balancer, elb, load balancer, balanceador], docs: "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/" }
+  - { id: aws.nlb, archetype: network.load-balancer, displayName: "Network Load Balancer", shortName: NLB, aliases: [nlb, network load balancer], docs: "https://docs.aws.amazon.com/elasticloadbalancing/latest/network/" }
+  - id: aws.ecs-fargate
+    archetype: compute.service
+    displayName: "Amazon ECS (Fargate)"
+    shortName: "ECS Fargate"
+    isDefault: true
+    aliases: [ecs, fargate, ecs fargate, container, conteiner, servico, microsservico, microservice, api, backend]
+    performance: { provisioningSeconds: 75 }
+    docs: "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html"
+  - id: aws.eks
+    archetype: compute.service
+    displayName: "Amazon EKS"
+    shortName: EKS
+    aliases: [eks, kubernetes, k8s]
+    performance: { provisioningSeconds: 150 }
+    pricing: { fixedMonthly: 73 }
+    docs: "https://docs.aws.amazon.com/eks/"
+  - id: aws.lambda
+    archetype: compute.function
+    displayName: "AWS Lambda"
+    shortName: Lambda
+    isDefault: true
+    aliases: [lambda, aws lambda, funcao, function, serverless]
+    performance: { accountConcurrencyLimit: 1000, scaleAddConcurrency: 1000, scaleEverySeconds: 10, coldStart: { p50: 250, p99: 1000 } }
+    docs: "https://docs.aws.amazon.com/lambda/latest/dg/welcome.html"
+  - { id: aws.flink, archetype: compute.stream-processor, displayName: "Amazon Managed Service for Apache Flink", shortName: "Managed Flink", isDefault: true, aliases: [flink, managed flink, kinesis analytics], docs: "https://docs.aws.amazon.com/managed-flink/" }
+  - { id: aws.stepfunctions, archetype: workflow.orchestrator, displayName: "AWS Step Functions", shortName: "Step Functions", isDefault: true, aliases: [step functions, stepfunctions, saga, workflow, orquestrador], docs: "https://docs.aws.amazon.com/step-functions/" }
+  - id: aws.aurora-postgresql
+    archetype: data.relational
+    displayName: "Amazon Aurora PostgreSQL"
+    shortName: "Aurora PostgreSQL"
+    isDefault: true
+    aliases: [aurora, aurora postgresql, postgres, postgresql, sql, banco relacional, banco de dados, ledger, db]
+    performance: { failoverSeconds: 30 }
+    docs: "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/"
+  - id: aws.rds-postgresql
+    archetype: data.relational
+    displayName: "Amazon RDS for PostgreSQL"
+    shortName: "RDS PostgreSQL"
+    aliases: [rds, rds postgresql, rds postgres]
+    performance: { failoverSeconds: 90 }
+    docs: "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_PostgreSQL.html"
+  - { id: aws.aurora-dsql, archetype: data.relational-distributed, displayName: "Amazon Aurora DSQL", shortName: "Aurora DSQL", isDefault: true, aliases: [dsql, aurora dsql, sql distribuido], docs: "https://docs.aws.amazon.com/aurora-dsql/" }
+  - id: aws.dynamodb
+    archetype: data.key-value
+    displayName: "Amazon DynamoDB"
+    shortName: DynamoDB
+    isDefault: true
+    aliases: [dynamodb, dynamo, ddb, nosql, chave valor]
+    performance: { readsPerSecondPerPartition: 3000, writesPerSecondPerPartition: 1000, maxRps: 40000 }
+    docs: "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/"
+  - { id: aws.documentdb, archetype: data.document, displayName: "Amazon DocumentDB", shortName: DocumentDB, isDefault: true, aliases: [documentdb, mongo, mongodb, documentos], docs: "https://docs.aws.amazon.com/documentdb/" }
+  - { id: aws.elasticache, archetype: data.cache, displayName: "Amazon ElastiCache (Valkey/Redis)", shortName: ElastiCache, isDefault: true, aliases: [elasticache, redis, valkey, memcached, cache], docs: "https://docs.aws.amazon.com/AmazonElastiCache/" }
+  - { id: aws.s3, archetype: data.object-storage, displayName: "Amazon S3", shortName: S3, isDefault: true, aliases: [s3, bucket, object storage, objetos], docs: "https://docs.aws.amazon.com/AmazonS3/latest/userguide/" }
+  - { id: aws.sqs, archetype: messaging.queue, displayName: "Amazon SQS (Standard)", shortName: SQS, isDefault: true, aliases: [sqs, fila, queue, sqs standard], docs: "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/" }
+  - id: aws.sqs-fifo
+    archetype: messaging.queue
+    displayName: "Amazon SQS (FIFO)"
+    shortName: "SQS FIFO"
+    aliases: [sqs fifo, fila fifo, fifo]
+    capabilities: { ordering: per-key }
+    performance: { messagesPerSecondPerGroup: 300, maxMessagesPerSecond: 30000 }
+    docs: "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues.html"
+  - { id: aws.sns, archetype: messaging.topic, displayName: "Amazon SNS", shortName: SNS, isDefault: true, aliases: [sns, topico, topic, pub sub, pubsub, notificacao], docs: "https://docs.aws.amazon.com/sns/" }
+  - { id: aws.kinesis, archetype: messaging.stream, displayName: "Amazon Kinesis Data Streams", shortName: Kinesis, isDefault: true, aliases: [kinesis, kinesis data streams, stream], performance: { recordsPerSecondPerPartition: 1000 }, docs: "https://docs.aws.amazon.com/streams/latest/dev/" }
+  - id: aws.msk
+    archetype: messaging.stream
+    displayName: "Amazon MSK (Kafka)"
+    shortName: MSK
+    aliases: [msk, kafka]
+    performance: { recordsPerSecondPerPartition: 5000, deliveryLatency: { p50: 20, p99: 120 } }
+    pricing: { perPartitionHour: 0.06 }
+    docs: "https://docs.aws.amazon.com/msk/"
+  - { id: aws.eventbridge, archetype: messaging.event-bus, displayName: "Amazon EventBridge", shortName: EventBridge, isDefault: true, aliases: [eventbridge, event bridge, barramento de eventos, event bus], docs: "https://docs.aws.amazon.com/eventbridge/" }
+  - { id: aws.cognito, archetype: security.identity, displayName: "Amazon Cognito", shortName: Cognito, isDefault: true, aliases: [cognito, identidade, login, oauth], docs: "https://docs.aws.amazon.com/cognito/" }
+  - { id: aws.secretsmanager, archetype: security.secrets, displayName: "AWS Secrets Manager + KMS", shortName: "Secrets Manager", isDefault: true, aliases: [secrets manager, kms, cofre, segredos, vault], docs: "https://docs.aws.amazon.com/secretsmanager/" }
+  - { id: aws.cloudwatch, archetype: observability, displayName: "Amazon CloudWatch", shortName: CloudWatch, isDefault: true, aliases: [cloudwatch, x-ray, xray, monitoramento, logs, metricas, observabilidade], docs: "https://docs.aws.amazon.com/cloudwatch/" }

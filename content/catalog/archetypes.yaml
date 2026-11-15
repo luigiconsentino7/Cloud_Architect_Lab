@@ -1,0 +1,366 @@
+# Arquétipos: o modelo de simulação e os padrões herdados por todos os serviços.
+# VALORES ILUSTRATIVOS — calibre com a documentação oficial (skill calibrar-catalogo).
+# Latências em ms; vazões por segundo; preços em USD (referência: região de São Paulo).
+version: "2026.11.0"
+archetypes:
+  - id: client
+    displayName: Cliente
+    category: clientes
+    scope: global
+    performance:
+      latency: { p50: 30, p99: 90 }
+
+  - id: external.system
+    displayName: Sistema externo
+    category: externos
+    scope: global
+
+  - id: edge.dns
+    displayName: DNS
+    category: borda
+    scope: global
+    pricing: { fixedMonthly: 1 }
+
+  - id: edge.cdn
+    displayName: CDN
+    category: borda
+    scope: global
+    performance:
+      latency: { p50: 4, p99: 18 }
+    pricing: { perMillionRequests: 1.2, perGbTransfer: 0.11 }
+
+  - id: edge.waf
+    displayName: WAF
+    category: borda
+    scope: regional
+    performance:
+      latency: { p50: 1, p99: 3 }
+    pricing: { fixedMonthly: 10, perMillionRequests: 0.6 }
+    configSchema:
+      type: object
+      properties:
+        rateLimitRps: { type: number, minimum: 0, default: 0, title: "Limite por IP (req/s, 0 = sem limite)" }
+
+  - id: edge.api-gateway
+    displayName: Gateway de API
+    category: borda
+    scope: regional
+    capabilities: { auth: configurable, rateLimit: configurable }
+    performance:
+      latency: { p50: 6, p99: 25 }
+      maxRps: 10000
+      burst: 5000
+      availability: 0.9999
+    pricing: { perMillionRequests: 4.25, perGbTransfer: 0.15 }
+    configSchema:
+      type: object
+      properties:
+        auth: { type: string, enum: [none, jwt, mtls, api-key], default: jwt, title: "Autenticação" }
+        throttle:
+          type: object
+          title: "Limite de requisições"
+          properties:
+            rps: { type: number, minimum: 1, default: 10000, title: "Requisições/s" }
+            burst: { type: number, minimum: 1, default: 5000, title: "Rajada" }
+        waf: { type: boolean, default: false, title: "WAF na frente" }
+
+  - id: network.load-balancer
+    displayName: Balanceador de carga
+    category: borda
+    scope: regional
+    performance:
+      latency: { p50: 1, p99: 4 }
+      maxRps: 100000
+      availability: 0.9999
+    pricing: { perInstanceHour: 0.0378, perMillionRequests: 0.8, perGbTransfer: 0.15 }
+    configSchema:
+      type: object
+      properties:
+        crossZone: { type: boolean, default: true, title: "Balancear entre zonas" }
+
+  - id: compute.service
+    displayName: Serviço em contêineres
+    category: computacao
+    scope: zonal
+    performance:
+      provisioningSeconds: 90
+      connectionsPerInstance: 20
+      availability: 0.9999
+    pricing: { perVcpuHour: 0.0656, perGbHour: 0.0072 }
+    configSchema:
+      type: object
+      properties:
+        instances:
+          type: object
+          title: "Instâncias"
+          properties:
+            min: { type: integer, minimum: 1, maximum: 500, default: 2, title: "Mínimo" }
+            max: { type: integer, minimum: 1, maximum: 1000, default: 10, title: "Máximo" }
+        vcpu: { type: number, enum: [0.25, 0.5, 1, 2, 4, 8], default: 1, title: "vCPU por instância" }
+        memoryGb: { type: number, enum: [0.5, 1, 2, 4, 8, 16], default: 2, title: "Memória (GB)" }
+        concurrencyPerInstance: { type: integer, minimum: 1, maximum: 1000, default: 64, title: "Requisições simultâneas por instância" }
+        autoscaling:
+          type: object
+          title: "Autoscaling"
+          properties:
+            enabled: { type: boolean, default: true, title: "Ligado" }
+            targetCpu: { type: number, minimum: 0.1, maximum: 0.95, default: 0.6, title: "Alvo de CPU" }
+        connectionPool: { type: integer, minimum: 1, maximum: 500, default: 20, title: "Pool de conexões ao banco" }
+
+  - id: compute.function
+    displayName: Função serverless
+    category: computacao
+    scope: regional
+    performance:
+      coldStart: { p50: 300, p99: 1200 }
+      accountConcurrencyLimit: 1000
+      scaleAddConcurrency: 1000
+      scaleEverySeconds: 10
+      availability: 0.9999
+      serviceTimeFactorByMemory: { "256": 2.2, "512": 1.5, "1024": 1.0, "2048": 0.75, "4096": 0.65 }
+    pricing: { perMillionRequests: 0.2, perGbSecond: 0.0000166667 }
+    configSchema:
+      type: object
+      properties:
+        memoryMb: { type: integer, enum: [256, 512, 1024, 2048, 4096], default: 1024, title: "Memória (MB)" }
+        reservedConcurrency: { type: integer, minimum: 0, maximum: 100000, default: 0, title: "Concorrência reservada (0 = limite da conta)" }
+        provisionedConcurrency: { type: integer, minimum: 0, maximum: 100000, default: 0, title: "Concorrência provisionada (sem cold start)" }
+        timeoutMs: { type: integer, minimum: 100, maximum: 900000, default: 10000, title: "Timeout (ms)" }
+
+  - id: compute.stream-processor
+    displayName: Processamento de stream
+    category: computacao
+    scope: zonal
+    performance:
+      provisioningSeconds: 120
+      availability: 0.9995
+    pricing: { perVcpuHour: 0.11, perGbHour: 0.012 }
+    configSchema:
+      type: object
+      properties:
+        parallelism: { type: integer, minimum: 1, maximum: 256, default: 4, title: "Paralelismo" }
+        vcpu: { type: number, enum: [1, 2, 4], default: 1, title: "vCPU por tarefa" }
+
+  - id: workflow.orchestrator
+    displayName: Orquestrador de fluxos
+    category: computacao
+    scope: regional
+    performance:
+      latency: { p50: 25, p99: 90 }
+      maxRps: 2000
+    pricing: { perMillionRequests: 25 }
+
+  - id: data.relational
+    displayName: Banco relacional
+    category: dados
+    scope: zonal
+    capabilities: { transactions: "true", conditionalWrites: "true", strongConsistency: "true" }
+    performance:
+      readLatency: { p50: 1.5, p99: 8 }
+      writeLatency: { p50: 3, p99: 15 }
+      transactionLatency: { p50: 6, p99: 30 }
+      opsPerSecondPerVcpu: 1500
+      failoverSeconds: 60
+      replicaLagMs: 40
+      availability: 0.9995
+      instanceClasses:
+        small: { vcpu: 2, memoryGb: 8, maxConnections: 400, opsFactor: 1, pricePerHour: 0.41 }
+        medium: { vcpu: 4, memoryGb: 16, maxConnections: 800, opsFactor: 1, pricePerHour: 0.82 }
+        large: { vcpu: 8, memoryGb: 32, maxConnections: 1600, opsFactor: 1, pricePerHour: 1.64 }
+        xlarge: { vcpu: 16, memoryGb: 64, maxConnections: 3000, opsFactor: 1, pricePerHour: 3.28 }
+    pricing: { perGbStoredMonth: 0.23, multiAzFactor: 2 }
+    configSchema:
+      type: object
+      properties:
+        instanceClass: { type: string, enum: [small, medium, large, xlarge], default: medium, title: "Classe da instância" }
+        multiAz: { type: boolean, default: false, title: "Multi-AZ (standby síncrono)" }
+        readReplicas: { type: integer, minimum: 0, maximum: 15, default: 0, title: "Réplicas de leitura" }
+        connectionProxy: { type: boolean, default: false, title: "Proxy de conexões" }
+        crossRegionReplica: { type: boolean, default: false, title: "Réplica em outra região (assíncrona)" }
+        storageGb: { type: integer, minimum: 20, maximum: 65536, default: 100, title: "Armazenamento (GB)" }
+
+  - id: data.relational-distributed
+    displayName: SQL distribuído
+    category: dados
+    scope: regional
+    capabilities: { transactions: "true", conditionalWrites: "true", strongConsistency: "true", multiRegion: "true" }
+    performance:
+      readLatency: { p50: 4, p99: 15 }
+      writeLatency: { p50: 10, p99: 35 }
+      transactionLatency: { p50: 18, p99: 60 }
+      opsPerSecondPerVcpu: 1000
+      availability: 0.99999
+    pricing: { perInstanceHour: 1.26, perGbStoredMonth: 0.39 }
+    configSchema:
+      type: object
+      properties:
+        nodes: { type: integer, minimum: 1, maximum: 100, default: 3, title: "Nós (capacidade)" }
+        multiRegion: { type: boolean, default: false, title: "Multirregião" }
+
+  - id: data.key-value
+    displayName: Banco chave-valor
+    category: dados
+    scope: regional
+    capabilities: { transactions: "true", conditionalWrites: "true", strongConsistency: configurable }
+    performance:
+      readLatency: { p50: 4, p99: 15 }
+      writeLatency: { p50: 6, p99: 22 }
+      transactionLatency: { p50: 14, p99: 45 }
+      readsPerSecondPerPartition: 3000
+      writesPerSecondPerPartition: 1000
+      maxRps: 40000
+      availability: 0.9999
+    pricing: { perMillionReads: 0.19, perMillionWrites: 0.94, perGbStoredMonth: 0.38 }
+    configSchema:
+      type: object
+      properties:
+        capacityMode: { type: string, enum: [on-demand, provisioned], default: on-demand, title: "Modo de capacidade" }
+        partitionKey: { type: string, default: "id", title: "Chave de partição" }
+        partitionKeyCardinality: { type: string, enum: [alta, media, baixa], default: alta, title: "Cardinalidade da chave" }
+        globalTables: { type: boolean, default: false, title: "Réplica global (multirregião)" }
+
+  - id: data.document
+    displayName: Banco de documentos
+    category: dados
+    scope: regional
+    capabilities: { transactions: "true", conditionalWrites: "true", strongConsistency: configurable }
+    performance:
+      readLatency: { p50: 5, p99: 18 }
+      writeLatency: { p50: 8, p99: 28 }
+      transactionLatency: { p50: 16, p99: 50 }
+      readsPerSecondPerPartition: 5000
+      writesPerSecondPerPartition: 1000
+      maxRps: 40000
+      availability: 0.9999
+    pricing: { perMillionReads: 0.3, perMillionWrites: 1.5, perGbStoredMonth: 0.25 }
+    configSchema:
+      type: object
+      properties:
+        partitionKey: { type: string, default: "id", title: "Chave de partição" }
+        partitionKeyCardinality: { type: string, enum: [alta, media, baixa], default: alta, title: "Cardinalidade da chave" }
+
+  - id: data.cache
+    displayName: Cache em memória
+    category: dados
+    scope: zonal
+    performance:
+      readLatency: { p50: 0.5, p99: 2 }
+      writeLatency: { p50: 0.6, p99: 2.5 }
+      maxRps: 100000
+      availability: 0.9995
+    pricing: { perInstanceHour: 0.25 }
+    configSchema:
+      type: object
+      properties:
+        nodes: { type: integer, minimum: 1, maximum: 100, default: 1, title: "Nós (shards)" }
+        replicas: { type: integer, minimum: 0, maximum: 5, default: 0, title: "Réplicas por shard" }
+        multiAz: { type: boolean, default: false, title: "Réplicas em outra AZ" }
+        ttlSeconds: { type: integer, minimum: 1, maximum: 604800, default: 300, title: "TTL (s)" }
+
+  - id: data.object-storage
+    displayName: Armazenamento de objetos
+    category: dados
+    scope: regional
+    capabilities: { immutability: configurable }
+    performance:
+      readLatency: { p50: 20, p99: 80 }
+      writeLatency: { p50: 30, p99: 120 }
+      maxRps: 50000
+      availability: 0.9999
+    pricing: { perGbStoredMonth: 0.0405, perMillionWrites: 7, perMillionReads: 0.56 }
+    configSchema:
+      type: object
+      properties:
+        objectLock: { type: boolean, default: false, title: "Bloqueio de objetos (WORM)" }
+        versioning: { type: boolean, default: false, title: "Versionamento" }
+
+  - id: messaging.queue
+    displayName: Fila
+    category: mensageria
+    scope: regional
+    capabilities: { ordering: none, delivery: at-least-once }
+    performance:
+      latency: { p50: 8, p99: 40 }
+      deliveryLatency: { p50: 15, p99: 80 }
+      maxMessagesPerSecond: 100000
+      availability: 0.9999
+    pricing: { perMillionRequests: 0.5 }
+    configSchema:
+      type: object
+      properties:
+        visibilityTimeoutSeconds: { type: integer, minimum: 0, maximum: 43200, default: 30, title: "Timeout de visibilidade (s)" }
+        dlq:
+          type: object
+          title: "Fila de mensagens mortas (DLQ)"
+          properties:
+            enabled: { type: boolean, default: false, title: "Ligada" }
+            maxReceiveCount: { type: integer, minimum: 1, maximum: 1000, default: 5, title: "Entregas antes da DLQ" }
+
+  - id: messaging.topic
+    displayName: Tópico (pub/sub)
+    category: mensageria
+    scope: regional
+    capabilities: { ordering: none, delivery: at-least-once }
+    performance:
+      latency: { p50: 10, p99: 50 }
+      deliveryLatency: { p50: 25, p99: 120 }
+      maxMessagesPerSecond: 100000
+      availability: 0.9999
+    pricing: { perMillionRequests: 0.5 }
+    configSchema:
+      type: object
+      properties:
+        dlq:
+          type: object
+          title: "DLQ das assinaturas"
+          properties:
+            enabled: { type: boolean, default: false, title: "Ligada" }
+            maxReceiveCount: { type: integer, minimum: 1, maximum: 1000, default: 5, title: "Entregas antes da DLQ" }
+
+  - id: messaging.stream
+    displayName: Stream (log particionado)
+    category: mensageria
+    scope: regional
+    capabilities: { ordering: per-key, delivery: at-least-once }
+    performance:
+      latency: { p50: 10, p99: 45 }
+      deliveryLatency: { p50: 60, p99: 300 }
+      recordsPerSecondPerPartition: 1000
+      availability: 0.9999
+    pricing: { perPartitionHour: 0.021, perMillionRequests: 0.02 }
+    configSchema:
+      type: object
+      properties:
+        partitions: { type: integer, minimum: 1, maximum: 10000, default: 4, title: "Partições (shards)" }
+        retentionHours: { type: integer, minimum: 1, maximum: 8760, default: 24, title: "Retenção (h)" }
+        partitionKey: { type: string, default: "accountId", title: "Chave de partição" }
+
+  - id: messaging.event-bus
+    displayName: Barramento de eventos
+    category: mensageria
+    scope: regional
+    capabilities: { ordering: none, delivery: at-least-once }
+    performance:
+      latency: { p50: 15, p99: 80 }
+      deliveryLatency: { p50: 120, p99: 500 }
+      maxMessagesPerSecond: 10000
+      availability: 0.9999
+    pricing: { perMillionRequests: 1.0 }
+
+  - id: security.identity
+    displayName: Identidade de usuários
+    category: seguranca
+    scope: regional
+    pricing: { fixedMonthly: 25 }
+
+  - id: security.secrets
+    displayName: Cofre de segredos e chaves
+    category: seguranca
+    scope: regional
+    pricing: { fixedMonthly: 6 }
+
+  - id: observability
+    displayName: Observabilidade
+    category: observabilidade
+    scope: regional
+    pricing: { fixedMonthly: 40 }

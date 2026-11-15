@@ -1,0 +1,37 @@
+# Componentes genéricos (sem marca) + clientes e sistemas externos, compartilhados por todas as paletas.
+provider: generic
+reviewedAt: "2026-11-15"
+components:
+  - { id: client.web, archetype: client, displayName: "Navegador (web)", shortName: Web, shared: true, isDefault: true, aliases: [web, browser, navegador, site, frontend, usuario] }
+  - { id: client.mobile, archetype: client, displayName: "App mobile", shortName: Mobile, shared: true, aliases: [app, mobile, celular, aplicativo, cliente] }
+  - { id: client.partner, archetype: client, displayName: "Sistema parceiro (B2B)", shortName: Parceiro, shared: true, aliases: [parceiro, partner, b2b, integrador, lojista] }
+  - { id: external.system, archetype: external.system, displayName: "Sistema externo", shortName: Externo, shared: true, isDefault: true, aliases: [externo, terceiro] }
+
+  - { id: generic.dns, archetype: edge.dns, displayName: DNS, isDefault: true, aliases: [dns] }
+  - { id: generic.cdn, archetype: edge.cdn, displayName: CDN, isDefault: true, aliases: [cdn] }
+  - { id: generic.waf, archetype: edge.waf, displayName: WAF, isDefault: true, aliases: [waf, firewall] }
+  - { id: generic.api-gateway, archetype: edge.api-gateway, displayName: "Gateway de API", shortName: "API Gateway", isDefault: true, aliases: [api gateway, gateway, apigw] }
+  - { id: generic.load-balancer, archetype: network.load-balancer, displayName: "Balanceador de carga", shortName: "Load balancer", isDefault: true, aliases: [load balancer, balanceador, lb] }
+  - { id: generic.service, archetype: compute.service, displayName: "Serviço (contêineres)", shortName: Serviço, isDefault: true, aliases: [servico, service, api, microsservico, microservice, container, conteiner, backend] }
+  - { id: generic.function, archetype: compute.function, displayName: "Função serverless", shortName: Função, isDefault: true, aliases: [funcao, function, serverless, lambda] }
+  - { id: generic.stream-processor, archetype: compute.stream-processor, displayName: "Processador de stream", isDefault: true, aliases: [stream processor, processador de stream, flink, spark streaming] }
+  - { id: generic.workflow, archetype: workflow.orchestrator, displayName: "Orquestrador (sagas)", shortName: Orquestrador, isDefault: true, aliases: [orquestrador, workflow, saga] }
+  - { id: generic.relational, archetype: data.relational, displayName: "Banco relacional", shortName: "SQL", isDefault: true, aliases: [banco relacional, banco de dados, sql, postgres, postgresql, mysql, database, db, ledger] }
+  - { id: generic.relational-distributed, archetype: data.relational-distributed, displayName: "SQL distribuído", isDefault: true, aliases: [sql distribuido, newsql, cockroachdb, distributed sql] }
+  - { id: generic.key-value, archetype: data.key-value, displayName: "Banco chave-valor", shortName: "Chave-valor", isDefault: true, aliases: [chave valor, key value, nosql, kv] }
+  - { id: generic.document, archetype: data.document, displayName: "Banco de documentos", isDefault: true, aliases: [documentos, document db, mongo, mongodb] }
+  - { id: generic.cache, archetype: data.cache, displayName: "Cache em memória", shortName: Cache, isDefault: true, aliases: [cache, redis, valkey, memcached] }
+  - { id: generic.object-storage, archetype: data.object-storage, displayName: "Armazenamento de objetos", shortName: Objetos, isDefault: true, aliases: [object storage, objetos, bucket, blob, s3] }
+  - { id: generic.queue, archetype: messaging.queue, displayName: Fila, isDefault: true, aliases: [fila, queue, rabbitmq, mensageria] }
+  - id: generic.queue-fifo
+    archetype: messaging.queue
+    displayName: "Fila FIFO"
+    aliases: [fila fifo, fifo]
+    capabilities: { ordering: per-key }
+    performance: { messagesPerSecondPerGroup: 300, maxMessagesPerSecond: 3000 }
+  - { id: generic.topic, archetype: messaging.topic, displayName: "Tópico (pub/sub)", shortName: Tópico, isDefault: true, aliases: [topico, topic, pub sub, pubsub, eventos] }
+  - { id: generic.stream, archetype: messaging.stream, displayName: "Stream (log particionado)", shortName: Stream, isDefault: true, aliases: [stream, kafka, log, event stream] }
+  - { id: generic.event-bus, archetype: messaging.event-bus, displayName: "Barramento de eventos", isDefault: true, aliases: [barramento de eventos, event bus] }
+  - { id: generic.identity, archetype: security.identity, displayName: "Identidade (OAuth/OIDC)", shortName: Identidade, isDefault: true, aliases: [identidade, oauth, oidc, login, auth] }
+  - { id: generic.secrets, archetype: security.secrets, displayName: "Cofre de segredos/KMS", shortName: Cofre, isDefault: true, aliases: [cofre, vault, kms, segredos, secrets] }
+  - { id: generic.observability, archetype: observability, displayName: "Observabilidade", isDefault: true, aliases: [observabilidade, monitoramento, logs, metricas, tracing, apm] }

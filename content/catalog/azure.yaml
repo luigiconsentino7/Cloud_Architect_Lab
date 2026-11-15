@@ -1,0 +1,82 @@
+# Azure — sobrescritas dos arquétipos. VALORES ILUSTRATIVOS (região Brazil South); calibrar com a documentação oficial.
+provider: azure
+reviewedAt: "2026-11-15"
+components:
+  - { id: azure.dns, archetype: edge.dns, displayName: "Azure DNS", isDefault: true, aliases: [azure dns, dns, traffic manager], docs: "https://learn.microsoft.com/azure/dns/" }
+  - { id: azure.frontdoor, archetype: edge.cdn, displayName: "Azure Front Door", shortName: "Front Door", isDefault: true, aliases: [front door, frontdoor, cdn, azure cdn], docs: "https://learn.microsoft.com/azure/frontdoor/" }
+  - { id: azure.waf, archetype: edge.waf, displayName: "Azure Web Application Firewall", shortName: "Azure WAF", isDefault: true, aliases: [waf, azure waf, firewall], docs: "https://learn.microsoft.com/azure/web-application-firewall/" }
+  - id: azure.apim
+    archetype: edge.api-gateway
+    displayName: "Azure API Management"
+    shortName: APIM
+    isDefault: true
+    aliases: [api management, apim, gateway, api gateway]
+    performance: { maxRps: 5000, burst: 2500, latency: { p50: 8, p99: 30 } }
+    docs: "https://learn.microsoft.com/azure/api-management/"
+  - { id: azure.appgateway, archetype: network.load-balancer, displayName: "Azure Application Gateway", shortName: "App Gateway", isDefault: true, aliases: [application gateway, app gateway, load balancer, balanceador], docs: "https://learn.microsoft.com/azure/application-gateway/" }
+  - { id: azure.loadbalancer, archetype: network.load-balancer, displayName: "Azure Load Balancer", aliases: [azure load balancer], docs: "https://learn.microsoft.com/azure/load-balancer/" }
+  - id: azure.containerapps
+    archetype: compute.service
+    displayName: "Azure Container Apps"
+    shortName: "Container Apps"
+    isDefault: true
+    aliases: [container apps, aca, container, conteiner, servico, microsservico, microservice, api, backend]
+    performance: { provisioningSeconds: 45 }
+    pricing: { perVcpuHour: 0.0864, perGbHour: 0.0108 }
+    docs: "https://learn.microsoft.com/azure/container-apps/"
+  - id: azure.aks
+    archetype: compute.service
+    displayName: "Azure Kubernetes Service"
+    shortName: AKS
+    aliases: [aks, kubernetes, k8s]
+    performance: { provisioningSeconds: 150 }
+    pricing: { fixedMonthly: 73 }
+    docs: "https://learn.microsoft.com/azure/aks/"
+  - id: azure.functions
+    archetype: compute.function
+    displayName: "Azure Functions (Flex Consumption)"
+    shortName: Functions
+    isDefault: true
+    aliases: [azure functions, functions, funcao, function, serverless]
+    performance: { accountConcurrencyLimit: 1000, coldStart: { p50: 400, p99: 2000 } }
+    docs: "https://learn.microsoft.com/azure/azure-functions/"
+  - { id: azure.streamanalytics, archetype: compute.stream-processor, displayName: "Azure Stream Analytics", shortName: "Stream Analytics", isDefault: true, aliases: [stream analytics], docs: "https://learn.microsoft.com/azure/stream-analytics/" }
+  - { id: azure.durablefunctions, archetype: workflow.orchestrator, displayName: "Durable Functions", isDefault: true, aliases: [durable functions, logic apps, saga, workflow, orquestrador], docs: "https://learn.microsoft.com/azure/azure-functions/durable/" }
+  - id: azure.postgresql
+    archetype: data.relational
+    displayName: "Azure Database for PostgreSQL"
+    shortName: "Azure PostgreSQL"
+    isDefault: true
+    aliases: [azure database for postgresql, postgres, postgresql, sql, banco relacional, banco de dados, ledger, db]
+    performance: { failoverSeconds: 90 }
+    docs: "https://learn.microsoft.com/azure/postgresql/"
+  - { id: azure.sql, archetype: data.relational, displayName: "Azure SQL Database", shortName: "Azure SQL", aliases: [azure sql, sql server, sql database], performance: { failoverSeconds: 45 }, docs: "https://learn.microsoft.com/azure/azure-sql/" }
+  - id: azure.cosmosdb
+    archetype: data.key-value
+    displayName: "Azure Cosmos DB"
+    shortName: "Cosmos DB"
+    isDefault: true
+    aliases: [cosmos db, cosmos, cosmosdb, nosql, chave valor]
+    performance: { readsPerSecondPerPartition: 10000, writesPerSecondPerPartition: 2000, maxRps: 50000 }
+    pricing: { perMillionReads: 0.35, perMillionWrites: 1.75 }
+    docs: "https://learn.microsoft.com/azure/cosmos-db/"
+  - { id: azure.cosmosdb-docs, archetype: data.document, displayName: "Azure Cosmos DB (documentos)", shortName: "Cosmos DB docs", isDefault: true, aliases: [cosmos documentos, documentos, mongo, mongodb], performance: { readsPerSecondPerPartition: 10000, writesPerSecondPerPartition: 2000 }, docs: "https://learn.microsoft.com/azure/cosmos-db/" }
+  - { id: azure.redis, archetype: data.cache, displayName: "Azure Managed Redis", shortName: "Managed Redis", isDefault: true, aliases: [azure managed redis, redis, valkey, cache], docs: "https://learn.microsoft.com/azure/redis/" }
+  - { id: azure.blob, archetype: data.object-storage, displayName: "Azure Blob Storage", shortName: "Blob Storage", isDefault: true, aliases: [blob storage, blob, storage account, bucket, objetos], docs: "https://learn.microsoft.com/azure/storage/blobs/" }
+  - id: azure.servicebus-queue
+    archetype: messaging.queue
+    displayName: "Azure Service Bus (fila)"
+    shortName: "Service Bus"
+    isDefault: true
+    aliases: [service bus, servicebus, fila, queue]
+    performance: { maxMessagesPerSecond: 4000 }
+    configSchema:
+      properties:
+        sessions: { type: boolean, default: false, title: "Sessões (ordem por chave)" }
+    docs: "https://learn.microsoft.com/azure/service-bus-messaging/"
+  - { id: azure.servicebus-topic, archetype: messaging.topic, displayName: "Azure Service Bus (tópico)", shortName: "SB Topic", isDefault: true, aliases: [service bus topic, topico, topic, pub sub], performance: { maxMessagesPerSecond: 4000 }, docs: "https://learn.microsoft.com/azure/service-bus-messaging/service-bus-queues-topics-subscriptions" }
+  - { id: azure.eventgrid, archetype: messaging.event-bus, displayName: "Azure Event Grid", shortName: "Event Grid", isDefault: true, aliases: [event grid, eventgrid, barramento de eventos, event bus], docs: "https://learn.microsoft.com/azure/event-grid/" }
+  - { id: azure.eventhubs, archetype: messaging.stream, displayName: "Azure Event Hubs", shortName: "Event Hubs", isDefault: true, aliases: [event hubs, eventhubs, kafka, stream], performance: { recordsPerSecondPerPartition: 1000 }, docs: "https://learn.microsoft.com/azure/event-hubs/" }
+  - { id: azure.entra, archetype: security.identity, displayName: "Microsoft Entra External ID", shortName: "Entra ID", isDefault: true, aliases: [entra, entra external id, azure ad b2c, b2c, identidade, login, oauth], docs: "https://learn.microsoft.com/entra/external-id/" }
+  - { id: azure.keyvault, archetype: security.secrets, displayName: "Azure Key Vault", shortName: "Key Vault", isDefault: true, aliases: [key vault, keyvault, cofre, segredos, kms, vault], docs: "https://learn.microsoft.com/azure/key-vault/" }
+  - { id: azure.monitor, archetype: observability, displayName: "Azure Monitor + Application Insights", shortName: "Azure Monitor", isDefault: true, aliases: [azure monitor, application insights, app insights, log analytics, monitoramento, observabilidade], docs: "https://learn.microsoft.com/azure/azure-monitor/" }
