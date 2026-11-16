@@ -224,6 +224,12 @@ public static class DesignEndpoints
                 ? Results.Ok(await attempts.ValidateAsync(attempt, ct))
                 : Results.NotFound());
 
+        // Sugestões para tipar formas desenhadas à mão (aliases do catálogo + IA local para as que não casaram).
+        group.MapPost("/label-mappings", async (Guid id, LabDbContext db, LabelMappingService mappings, CancellationToken ct) =>
+            await db.Attempts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, ct) is { } attempt
+                ? Results.Ok(await mappings.SuggestAsync(attempt, ct))
+                : Results.NotFound());
+
         group.MapPost("/hints", async (Guid id, LabDbContext db, IChallengeQueries challenges, CancellationToken ct) =>
         {
             var attempt = await db.Attempts.FirstOrDefaultAsync(a => a.Id == id, ct);

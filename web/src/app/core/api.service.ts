@@ -21,6 +21,7 @@ import {
   GameMode,
   Hint,
   HistoryItem,
+  LabelMapping,
   LibraryItem,
   Me,
   NarrativeState,
@@ -110,6 +111,11 @@ export class ApiService {
 
   validate(id: string): Promise<Validation> {
     return this.post<Validation>(`/api/attempts/${id}/validate`, {});
+  }
+
+  /** Sugestões para tipar formas desenhadas à mão (catálogo e, com o Ollama, IA local). */
+  labelMappings(attemptId: string): Promise<LabelMapping[]> {
+    return this.post<LabelMapping[]>(`/api/attempts/${attemptId}/label-mappings`, {});
   }
 
   hint(id: string): Promise<Hint> {

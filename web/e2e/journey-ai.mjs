@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { startFakeOllama } from './fake-ollama.mjs';
-import { api, base, injectReference, shots, waitFor, watchErrors } from './helpers.mjs';
+import { api, base, draftWithShapes, injectReference, shots, waitFor, watchErrors } from './helpers.mjs';
 
 // Pedaços espaçados o bastante para dar para ver (e testar) a resposta sendo escrita.
 const ollama = await startFakeOllama({ port: Number(process.env.FAKE_OLLAMA_PORT ?? 11999), chunkDelayMs: 120 });
@@ -57,8 +57,24 @@ try {
   assert.doesNotMatch(interviewer.messages[0].content, /reference|referência da solução/i, 'o entrevistador não recebe a referência');
   await page.screenshot({ path: `${shots}/ia-entrevistador.png` });
 
-  // Jornada 3: submissão → nota determinística → narrativa da IA conferida contra a revisão.
-  await page.click('nav.tabs button:has-text("Enunciado")');
+  // Jornada 3: anotação sem alias ganha sugestão da IA (só ids da paleta) e vira componente com um clique.
+  const shapes = await draftWithShapes(['Motor de regras antifraude']);
+  await page.goto(`${base}/desafios/${shapes.challengeId}`);
+  await page.waitForSelector('.excalidraw');
+  await page.click('nav.tabs button:has-text("Problemas")');
+  await page.click('button:has-text("Sugerir componentes com a IA")', { timeout: 15_000 });
+  await page.waitForSelector('.map-actions button:has-text("(IA)")', { timeout: 30_000 });
+  const mapper = ollama.requests.find((r) => r.messages[0].content.startsWith('Você ajuda a tipar'));
+  assert.ok(mapper?.format?.properties?.catalogId?.enum?.includes('nenhum'), 'o mapeador manda a paleta e a opção "nenhum" no schema');
+  await page.click('.map-actions button:has-text("(IA)")');
+  await waitFor(async () => (await api(`/api/challenges/${shapes.challengeId}/attempts`)).at(-1).scene.elements.find((e) => e.id === 'shape_0')?.customData?.kind, (k) => k === 'component', 15_000);
+  const left = await waitFor(async () => page.locator('button.problem.info').count(), (n) => n === 0, 15_000);
+  assert.equal(left, 0, 'a validação ao vivo tira a forma das anotações depois do mapeamento');
+  await page.screenshot({ path: `${shots}/ia-mapeamento.png` });
+
+  // Jornada 4: submissão → nota determinística → narrativa da IA conferida contra a revisão.
+  await page.goto(`${base}/desafios/${challengeId}`);
+  await page.waitForSelector('.excalidraw');
   await injectReference(page, challengeId);
   await page.click('button:has-text("Submeter")');
   await page.waitForURL(/avaliacoes/);

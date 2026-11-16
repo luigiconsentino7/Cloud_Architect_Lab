@@ -59,3 +59,19 @@ export function watchErrors(page) {
   page.on('dialog', (d) => d.accept());
   return errors;
 }
+
+/** Cria um desafio com um rascunho que tem formas desenhadas à mão (sem tipo), no formato mínimo do motor. */
+export async function draftWithShapes(labels, seedId = 'pix/consulta-dict', difficulty = 'junior') {
+  const challenge = await api('/api/challenges', { method: 'POST', headers, body: JSON.stringify({ seedId, provider: 'aws', difficulty }) });
+  const attempt = await api(`/api/challenges/${challenge.id}/attempts`, { method: 'POST', headers, body: '{}' });
+  const elements = labels.flatMap((label, i) => [
+    { id: `shape_${i}`, type: 'rectangle', x: 200 + i * 260, y: 120, width: 180, height: 80 },
+    { id: `shape_${i}_txt`, type: 'text', x: 210 + i * 260, y: 150, width: 160, height: 20, containerId: `shape_${i}`, text: label },
+  ]);
+  await api(`/api/attempts/${attempt.id}/draft`, {
+    method: 'PUT',
+    headers: { ...headers, 'If-Match': `"${attempt.draftVersion}"` },
+    body: JSON.stringify({ scene: { type: 'excalidraw', version: 2, elements, appState: {} } }),
+  });
+  return { challengeId: challenge.id, attemptId: attempt.id };
+}

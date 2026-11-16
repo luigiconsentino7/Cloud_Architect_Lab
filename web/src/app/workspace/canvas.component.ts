@@ -32,7 +32,7 @@ export class CanvasComponent implements OnDestroy {
   /** Emitido quando algum elemento muda (não a cada movimento do mouse). */
   /** O usuário (ou o app, a pedido dele) mudou o desenho: o workspace salva. */
   readonly sceneChange = output<readonly SceneElement[]>();
-  /** Cena carregada ou só remedida (abertura, fonte que terminou de carregar): atualiza os painéis, sem salvar. */
+  /** Cena recém-aberta: atualiza os painéis, sem salvar. */
   readonly sceneLoad = output<readonly SceneElement[]>();
   readonly selectionChange = output<string[]>();
 
@@ -43,7 +43,6 @@ export class CanvasComponent implements OnDestroy {
   private excalidraw?: ExcalidrawModule;
   private lastSignature = '';
   private lastSelection = '';
-  private measuring = false;
 
   constructor() {
     afterNextRender(() => void this.mount());
@@ -150,14 +149,15 @@ export class CanvasComponent implements OnDestroy {
     for (let i = 0; i < 50 && !excalifontLoaded(); i++) await new Promise((resolve) => setTimeout(resolve, 200));
     if (!this.api || !this.excalidraw) return;
     const elements = this.api.getSceneElementsIncludingDeleted();
-    if (!elements.some((e) => e.type === 'text' && !e.isDeleted)) return;
-    // Remedir texto não é edição do usuário: a mudança sai como carga, sem marcar o rascunho nem disparar o autosave.
-    this.measuring = true;
-    this.api.updateScene({
-      elements: this.excalidraw.restoreElements(elements, null, { refreshDimensions: true, repairBindings: true }),
-      captureUpdate: this.excalidraw.CaptureUpdateAction.NEVER,
+    const refreshed = this.excalidraw.restoreElements(elements, null, { refreshDimensions: true, repairBindings: true });
+    // Só atualiza se algum texto mudou de tamanho; aí a mudança é salva como qualquer edição (na próxima abertura,
+    // as medidas já vêm certas e nada muda). Nunca marcar isso como "carga": engoliria uma edição do mesmo instante.
+    const before = new Map(elements.map((e) => [e.id, e]));
+    const moved = refreshed.some((e) => {
+      const old = before.get(e.id);
+      return e.type === 'text' && !e.isDeleted && !!old && (Math.abs(e.width - old.width) > 0.5 || Math.abs(e.height - old.height) > 0.5 || Math.abs(e.x - old.x) > 0.5);
     });
-    setTimeout(() => (this.measuring = false), 300);
+    if (moved) this.api.updateScene({ elements: refreshed, captureUpdate: this.excalidraw.CaptureUpdateAction.NEVER });
   }
 
   private onChange(elements: readonly SceneElement[], selected: string[]): void {
@@ -169,7 +169,7 @@ export class CanvasComponent implements OnDestroy {
 
     const signature = sceneSignature(elements);
     if (signature === this.lastSignature) return;
-    const loading = this.lastSignature === '' || this.measuring;
+    const loading = this.lastSignature === '';
     this.lastSignature = signature;
     if (!this.readOnly()) {
       // Setas novas ganham id de conexão estável antes de qualquer um usá-las nos fluxos.

@@ -80,3 +80,34 @@ public sealed class PersonalizerTests
         (await broken.PersonalizeAsync(Request(), TestContext.Current.CancellationToken)).ShouldBeNull();
     }
 }
+
+public sealed class LabelMapperTests
+{
+    private static readonly LabelMappingRequest Request = new("fila de pedidos", "pix-service",
+        [new MappingCandidate("aws.sqs", "Amazon SQS", "messaging.queue"), new MappingCandidate("aws.lambda", "AWS Lambda", "compute.function")]);
+
+    [Theory]
+    [InlineData("aws.sqs", "aws.sqs")]
+    [InlineData("nenhum", null)]
+    [InlineData("aws.inventado", null)]
+    public async Task So_aceita_um_id_da_paleta(string answer, string? expected)
+    {
+        var client = new FakeChatClient((_, _) => TestAi.Json(new { catalogId = answer, reason = "fila" }));
+        var mapper = new LabelMapper(TestAi.Runtime(client), TestAi.Prompts(), TestAi.Log<LabelMapper>());
+
+        var suggestion = await mapper.SuggestAsync(Request, TestContext.Current.CancellationToken);
+
+        suggestion?.CatalogId.ShouldBe(expected);
+        if (expected is null) suggestion.ShouldBeNull();
+        FakeChatClient.SchemaEnum(client.Calls[0].Options, "catalogId").ShouldBe(["aws.sqs", "aws.lambda", "nenhum"]);
+        client.Calls[0].Messages[1].Text.ShouldContain("Componente mais próximo no desenho: pix-service");
+    }
+
+    [Fact]
+    public async Task Sem_ia_nao_sugere_nada()
+    {
+        var mapper = new LabelMapper(TestAi.Runtime(null), TestAi.Prompts(), TestAi.Log<LabelMapper>());
+
+        (await mapper.SuggestAsync(Request, TestContext.Current.CancellationToken)).ShouldBeNull();
+    }
+}

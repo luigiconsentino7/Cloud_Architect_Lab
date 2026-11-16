@@ -184,6 +184,20 @@ export function elementsForIrIds(elements: readonly SceneElement[], irIds: reado
 }
 
 /** Cópia do elemento com customData novo e versão incrementada (o Excalidraw só aplica mudanças com versão nova). */
+/**
+ * Tipa uma forma desenhada à mão: vira o componente do catálogo com o mesmo lugar, tamanho, rótulo e setas, e ganha a
+ * cor da categoria (como os componentes da paleta).
+ */
+export function typedShape(
+  shape: SceneElement,
+  component: Pick<PaletteComponent, 'id' | 'category'>,
+  componentId: string,
+  catalogVersion: string,
+): SceneElement {
+  const data: ComponentData = { kind: 'component', componentId, catalogId: component.id, role: 'anchor', catalogVersion };
+  return { ...withCustomData(shape, data as unknown as Record<string, unknown>), backgroundColor: colorFor(component.category), fillStyle: 'solid' };
+}
+
 export function withCustomData(element: SceneElement, customData: Record<string, unknown>): SceneElement {
   const version = typeof element['version'] === 'number' ? (element['version'] as number) : 1;
   return { ...element, customData, version: version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: Date.now() };

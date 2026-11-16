@@ -2,9 +2,9 @@ import { ChangeDetectionStrategy, Component, OnDestroy, computed, effect, inject
 import { Router, RouterLink } from '@angular/router';
 import { ApiService, problemMessage } from '../core/api.service';
 import { difficultyName, fmt, metricName, modeName, providerName, sloTarget } from '../core/format';
-import { Attempt, Challenge, FlowDefinition, Hint, Palette, PaletteComponent, SceneElement, Validation } from '../core/models';
+import { Attempt, Challenge, FlowDefinition, Hint, MappingOption, Palette, PaletteComponent, SceneElement, Validation } from '../core/models';
 import { CanvasComponent } from './canvas.component';
-import { Selection, componentData, componentSkeleton, connectionIdOf, elementsForIrIds, externalSkeleton, freePosition, live, nextComponentId, normalize, selectionOf, withCustomData } from './canvas-adapter';
+import { Selection, componentData, componentSkeleton, connectionIdOf, elementsForIrIds, externalSkeleton, freePosition, live, nextComponentId, normalize, selectionOf, typedShape, withCustomData } from './canvas-adapter';
 import { FlowsComponent } from './flows.component';
 import { CustomDataChange, InspectorComponent } from './inspector.component';
 import { ChatComponent } from '../shared/chat.component';
@@ -59,6 +59,11 @@ export class WorkspaceComponent implements OnDestroy {
   protected readonly hints = signal<Hint[]>([]);
   protected readonly paletteFilter = signal('');
   protected readonly adjusting = signal(false);
+  protected readonly aiOn = signal(false);
+  protected readonly suggesting = signal(false);
+  /** Sugestões da IA para as anotações, por id do elemento no canvas. */
+  protected readonly aiMappings = signal<Record<string, MappingOption[]>>({});
+  protected readonly annotations = computed(() => this.validation()?.graph.annotations ?? []);
   protected readonly loadError = signal<string | null>(null);
 
   protected readonly selection = computed<Selection>(() => selectionOf(this.elements(), this.selectedIds()));
@@ -84,6 +89,9 @@ export class WorkspaceComponent implements OnDestroy {
   });
 
   private saveTimer?: ReturnType<typeof setTimeout>;
+  private liveTimer?: ReturnType<typeof setTimeout>;
+  private validating = false;
+  private revalidate = false;
   private flowsTimer?: ReturnType<typeof setTimeout>;
   private pendingScene = false;
 
@@ -99,6 +107,7 @@ export class WorkspaceComponent implements OnDestroy {
     if (this.pendingScene) void this.saveNow();
     clearTimeout(this.saveTimer);
     clearTimeout(this.flowsTimer);
+    clearTimeout(this.liveTimer);
   }
 
   protected setTab(tab: Tab): void {
@@ -143,7 +152,14 @@ export class WorkspaceComponent implements OnDestroy {
     const attempt = this.attempt();
     if (!attempt || !this.editable()) return;
     clearTimeout(this.flowsTimer);
-    this.flowsTimer = setTimeout(() => void this.api.saveFlows(attempt.id, flows).catch((e) => this.message.set(problemMessage(e))), 400);
+    this.flowsTimer = setTimeout(
+      () =>
+        void this.api
+          .saveFlows(attempt.id, flows)
+          .then(() => this.scheduleLiveValidation())
+          .catch((e) => this.message.set(problemMessage(e))),
+      400,
+    );
   }
 
   protected highlight(irIds: string[], elementIds: string[] = []): void {
@@ -203,6 +219,36 @@ export class WorkspaceComponent implements OnDestroy {
     });
   }
 
+  /** Tipa a forma desenhada à mão como o componente escolhido e abre o inspector nela. */
+  protected mapShape(elementId: string, catalogId: string): void {
+    const canvas = this.canvas();
+    const palette = this.palette();
+    if (!canvas || !palette || !this.editable()) return;
+    const elements = canvas.elements();
+    const shape = elements.find((e) => e.id === elementId && !e.isDeleted);
+    const component = palette.components.find((c) => c.id === catalogId);
+    if (!shape || !component) return;
+    canvas.replace([typedShape(shape, component, nextComponentId(elements, catalogId), palette.catalogVersion)]);
+    this.aiMappings.update(({ [elementId]: _, ...rest }) => rest);
+    canvas.select([elementId]);
+  }
+
+  /** Pede à IA local um componente para cada anotação (salva antes: o servidor lê o rascunho salvo). */
+  protected async suggestWithAi(): Promise<void> {
+    const attempt = this.attempt();
+    if (!attempt) return;
+    this.suggesting.set(true);
+    try {
+      if (this.pendingScene) await this.saveNow();
+      const mappings = await this.api.labelMappings(attempt.id);
+      this.aiMappings.set(Object.fromEntries(mappings.filter((m) => m.kind === 'anotacao').map((m) => [m.elementId, m.options])));
+    } catch (error) {
+      this.message.set(problemMessage(error));
+    } finally {
+      this.suggesting.set(false);
+    }
+  }
+
   /** "Outro": mesma semente, nuvem, nível e pegadinhas, com números novos. */
   protected async another(): Promise<void> {
     const challenge = this.challenge();
@@ -250,6 +296,7 @@ export class WorkspaceComponent implements OnDestroy {
     if (this.pendingScene) await this.saveNow();
     clearTimeout(this.saveTimer);
     clearTimeout(this.flowsTimer);
+    clearTimeout(this.liveTimer);
     if (this.challenge() && this.challenge()!.id !== id) {
       // Limpa a tela do desafio anterior: o canvas é recriado com o desenho do novo.
       this.challenge.set(null);
@@ -259,6 +306,7 @@ export class WorkspaceComponent implements OnDestroy {
       this.flows.set([]);
       this.elements.set([]);
       this.selectedIds.set([]);
+      this.aiMappings.set({});
       this.message.set(null);
       this.loadError.set(null);
       this.tab.set('brief');
@@ -268,6 +316,7 @@ export class WorkspaceComponent implements OnDestroy {
   }
 
   private async load(): Promise<void> {
+    void this.api.aiStatus().then((status) => this.aiOn.set(status.mode === 'ollama')).catch(() => undefined);
     try {
       const challenge = await this.api.challenge(this.id());
       this.challenge.set(challenge);
@@ -282,6 +331,7 @@ export class WorkspaceComponent implements OnDestroy {
         queueMicrotask(() => this.placeStarters(challenge, palette));
       } else {
         this.attempt.set(attempt);
+        if (attempt.status === 'draft' && attempt.scene.elements.length > 0) this.scheduleLiveValidation(300);
       }
     } catch (error) {
       this.loadError.set(problemMessage(error));
@@ -326,11 +376,41 @@ export class WorkspaceComponent implements OnDestroy {
       const result = await this.api.saveDraft(attempt.id, canvas.snapshot(), attempt.draftVersion);
       this.attempt.set({ ...attempt, draftVersion: result.draftVersion });
       this.saveState.set(this.pendingScene ? 'dirty' : 'saved');
+      this.scheduleLiveValidation();
     } catch (error) {
       const status = (error as { status?: number }).status;
       this.saveState.set(status === 412 ? 'conflict' : 'error');
       this.pendingScene = true;
       if (status !== 412) this.message.set(problemMessage(error));
+    }
+  }
+
+  /** Validação ao vivo: depois de salvar o desenho ou os fluxos, valida em segundo plano, sem trocar de aba. */
+  private scheduleLiveValidation(delay = 600): void {
+    if (!this.editable()) return;
+    clearTimeout(this.liveTimer);
+    this.liveTimer = setTimeout(() => void this.liveValidate(), delay);
+  }
+
+  private async liveValidate(): Promise<void> {
+    const attempt = this.attempt();
+    if (!attempt || !this.editable()) return;
+    if (this.validating) {
+      this.revalidate = true;
+      return;
+    }
+    this.validating = true;
+    try {
+      const result = await this.api.validate(attempt.id);
+      if (this.attempt()?.id === attempt.id) this.validation.set(result);
+    } catch {
+      // silencioso: o botão Validar mostra o erro com detalhes
+    } finally {
+      this.validating = false;
+      if (this.revalidate) {
+        this.revalidate = false;
+        this.scheduleLiveValidation(0);
+      }
     }
   }
 

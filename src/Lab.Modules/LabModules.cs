@@ -72,6 +72,8 @@ public static class LabModules
         services.AddSingleton<IChallengePersonalizer, ChallengePersonalizer>();
         services.AddSingleton<IInterviewer, Interviewer>();
         services.AddSingleton<IReviewNarrator, ReviewNarrator>();
+        services.AddSingleton<ILabelMapper, LabelMapper>();
+        services.AddScoped<LabelMappingService>();
         return services;
     }
 

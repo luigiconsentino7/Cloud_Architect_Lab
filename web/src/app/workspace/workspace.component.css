@@ -72,3 +72,7 @@ summary { cursor: pointer; }
 .brief-actions { display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 6px; }
 .brief-actions button { font-size: 12.5px; padding: 4px 10px; }
 .brief-actions button.active { border-color: var(--accent); color: var(--accent); }
+
+.map-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 8px 10px; }
+.map-actions .small, .problems > .small { font-size: 12px; padding: 3px 9px; }
+.hint-text { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }

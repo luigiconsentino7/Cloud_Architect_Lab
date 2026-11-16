@@ -10,6 +10,7 @@ import {
   needsRestore,
   selectionOf,
   toSkeletons,
+  typedShape,
 } from './canvas-adapter';
 import { suggestFlow } from './flows.component';
 
@@ -130,6 +131,19 @@ describe('canvas-adapter', () => {
     expect(dedupe['width']).toBeGreaterThan(160);
     expect(link['x']).toBe((dedupe['width'] as number) + 6);
     expect(skeletons.find((s) => s['id'] === 'el_push')!['width']).toBe(160);
+  });
+
+  it('tipa uma forma desenhada à mão sem mudar o lugar, o rótulo nem as setas', () => {
+    const shape: SceneElement = { id: 'shape_1', type: 'rectangle', x: 40, y: 60, width: 120, height: 70, version: 3 };
+    const label: SceneElement = { id: 'shape_1_txt', type: 'text', x: 50, y: 80, width: 80, height: 20, containerId: 'shape_1', text: 'Redis' };
+
+    const typed = typedShape(shape, { id: 'aws.elasticache', category: 'dados' }, 'elasticache_1', '2026.11.0');
+    const selection = selectionOf([typed, label], ['shape_1']);
+
+    expect(typed.customData).toEqual({ kind: 'component', componentId: 'elasticache_1', catalogId: 'aws.elasticache', role: 'anchor', catalogVersion: '2026.11.0' });
+    expect([typed.x, typed.y, typed.width]).toEqual([40, 60, 120]);
+    expect(typed['version']).toBe(4);
+    expect(selection?.kind === 'component' && selection.label).toBe('Redis');
   });
 
   it('sugere o fluxo percorrendo as setas a partir do cliente de entrada', () => {

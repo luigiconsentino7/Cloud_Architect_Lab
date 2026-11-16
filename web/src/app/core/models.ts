@@ -267,6 +267,22 @@ export interface ArchitectureGraph {
   nodes: IrNode[];
   edges: IrEdge[];
   flows: FlowDefinition[];
+  /** Formas com texto que não viraram componente (o id é o do elemento no canvas). */
+  annotations?: { id: string; text: string; near?: string }[];
+}
+
+export interface MappingOption {
+  catalogId: string;
+  displayName: string;
+  source: 'catalogo' | 'ia';
+  reason?: string;
+}
+
+export interface LabelMapping {
+  elementId: string;
+  label: string;
+  kind: 'sem-tipo' | 'anotacao';
+  options: MappingOption[];
 }
 
 export interface Validation {

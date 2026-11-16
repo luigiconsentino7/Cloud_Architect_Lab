@@ -17,6 +17,11 @@ function personalize(format) {
   };
 }
 
+function mapLabel(format) {
+  const ids = (format?.properties?.catalogId?.enum ?? []).filter((id) => id !== 'nenhum');
+  return { catalogId: ids.find((id) => id.includes('lambda') || id.includes('functions')) ?? ids[0] ?? 'nenhum', reason: 'Regras de negócio rodam bem em funções.' };
+}
+
 function narrate(user) {
   const score = /Nota final: (\d+)/.exec(user)?.[1] ?? '0';
   return {
@@ -50,7 +55,9 @@ export function startFakeOllama({ port = 11999, model = 'qwen2.5:3b', chunkDelay
       ? JSON.stringify(personalize(body.format))
       : system.startsWith('Você é um mentor')
         ? JSON.stringify(narrate(firstUser))
-        : interviewAnswer;
+        : system.startsWith('Você ajuda a tipar')
+          ? JSON.stringify(mapLabel(body.format))
+          : interviewAnswer;
 
     const done = { model, created_at: new Date().toISOString(), done: true, done_reason: 'stop', total_duration: 1, prompt_eval_count: 10, eval_count: 10 };
     if (body.stream === false) {

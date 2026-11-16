@@ -14,6 +14,7 @@ public static class PromptRoles
     public const string Personalizer = "personalizador";
     public const string Interviewer = "entrevistador";
     public const string Narrator = "narrador";
+    public const string Mapper = "mapeador";
 }
 
 /// <summary>Carrega a versão mais nova de cada papel. O front-matter (modelos-alvo, changelog) não vai para o modelo.</summary>

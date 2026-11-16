@@ -130,6 +130,30 @@ public sealed class AiTests
     }
 
     [Fact]
+    public async Task Com_ia_local_a_anotacao_ganha_sugestao_so_se_for_da_paleta()
+    {
+        var fake = new ScriptedModel
+        {
+            Map = (options, label) => new { catalogId = label.Contains("antifraude") ? "aws.lambda" : "aws.servico-inventado", reason = "Regras rodam em funções." },
+        };
+        await using var factory = WithModel(fake);
+        var api = factory.Api();
+        var attemptId = await LabelMappingTests.DraftWithShapes(api);
+
+        var mappings = JsonNode.Parse(await (await api.PostAsync($"/api/attempts/{attemptId}/label-mappings", null)).Content.ReadAsStringAsync())!.AsArray();
+
+        var note = mappings.Single(m => m!["label"]!.GetValue<string>() == "Motor de regras antifraude")!;
+        note["options"]![0]!["catalogId"]!.GetValue<string>().ShouldBe("aws.lambda");
+        note["options"]![0]!["source"]!.GetValue<string>().ShouldBe("ia");
+        note["options"]![0]!["reason"]!.GetValue<string>().ShouldBe("Regras rodam em funções.");
+        var call = fake.Calls.Single(c => c.Messages[0].Text.StartsWith("Você ajuda a tipar", StringComparison.Ordinal));
+        ScriptedModel.Enum(call.Options, "catalogId").ShouldContain("nenhum");
+        ScriptedModel.Enum(call.Options, "catalogId").ShouldNotContain("client.mobile");
+        call.Messages[1].Text.ShouldContain("<rotulo>\nMotor de regras antifraude\n</rotulo>");
+        mappings.Single(m => m!["label"]!.GetValue<string>() == "Redis")!["options"]![0]!["source"]!.GetValue<string>().ShouldBe("catalogo"); // alias: sem IA
+    }
+
+    [Fact]
     public async Task Com_ia_local_o_entrevistador_transmite_e_nao_conhece_o_que_e_oculto()
     {
         var fake = new ScriptedModel { Interview = "Pode assumir, mas deixe a premissa explícita no desenho." };
@@ -226,6 +250,7 @@ public sealed class AiTests
     {
         public Func<ChatOptions?, object>? Personalize { get; set; }
         public Func<string, object>? Narrate { get; set; }
+        public Func<ChatOptions?, string, object>? Map { get; set; }
         public string Interview { get; set; } = "Não está definido no enunciado.";
         public List<(IReadOnlyList<ChatMessage> Messages, ChatOptions? Options)> Calls { get; } = [];
 
@@ -240,6 +265,7 @@ public sealed class AiTests
             var system = list[0].Text;
             object? reply = system.StartsWith("Você monta desafios", StringComparison.Ordinal) ? Personalize?.Invoke(options)
                 : system.StartsWith("Você é um mentor", StringComparison.Ordinal) ? Narrate?.Invoke(list.First(m => m.Role == ChatRole.User).Text)
+                : system.StartsWith("Você ajuda a tipar", StringComparison.Ordinal) ? Map?.Invoke(options, list.First(m => m.Role == ChatRole.User).Text)
                 : null;
             var text = reply is null ? Interview : JsonSerializer.Serialize(reply);
             return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, text)));

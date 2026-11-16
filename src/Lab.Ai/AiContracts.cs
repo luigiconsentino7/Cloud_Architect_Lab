@@ -117,3 +117,18 @@ public interface IReviewNarrator
     /// </summary>
     Task<ReviewNarrative?> NarrateAsync(NarrationRequest request, CancellationToken cancellationToken);
 }
+
+// ---- mapeamento de formas sem tipo ----
+
+public sealed record MappingCandidate(string CatalogId, string DisplayName, string Archetype);
+
+/// <param name="Near">Rótulo do componente mais próximo no desenho, quando houver (ajuda a desambiguar).</param>
+public sealed record LabelMappingRequest(string Label, string? Near, IReadOnlyList<MappingCandidate> Candidates);
+
+public sealed record LabelSuggestion(string CatalogId, string Reason, string Model, string PromptVersion);
+
+public interface ILabelMapper
+{
+    /// <summary>O componente do catálogo que o rótulo descreve, ou nulo (sem IA, anotação de texto livre ou resposta inválida).</summary>
+    Task<LabelSuggestion?> SuggestAsync(LabelMappingRequest request, CancellationToken cancellationToken);
+}

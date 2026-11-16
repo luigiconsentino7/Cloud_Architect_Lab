@@ -234,6 +234,38 @@
                   <button type="button" class="problem {{ d.severity }}" (click)="highlight(d.irIds, d.elementIds)">
                     <span class="code">{{ d.code }}</span> {{ d.message }}
                   </button>
+                  @if (editable() && d.code === 'IR004' && d.suggestions?.length) {
+                    <div class="map-actions">
+                      @for (s of d.suggestions!; track s.catalogId) {
+                        <button type="button" class="small" (click)="mapShape(d.elementIds[0], s.catalogId)">Mapear para {{ s.displayName }}</button>
+                      }
+                    </div>
+                  }
+                }
+                @if (annotations().length > 0) {
+                  <h4>Anotações</h4>
+                  <p class="hint-text">
+                    Formas com texto que não viraram componente. Se alguma for um serviço, arraste o certo da paleta{{ aiOn() ? ' ou peça uma sugestão à IA local' : '' }}.
+                  </p>
+                  @for (a of annotations(); track a.id) {
+                    <button type="button" class="problem info" (click)="highlight([], [a.id])">“{{ a.text }}”</button>
+                    @if (aiMappings()[a.id]; as options) {
+                      <div class="map-actions">
+                        @for (o of options; track o.catalogId) {
+                          <button type="button" class="small" [disabled]="!editable()" [title]="o.reason ?? ''" (click)="mapShape(a.id, o.catalogId)">
+                            Mapear para {{ o.displayName }} (IA)
+                          </button>
+                        } @empty {
+                          <span class="hint-text">A IA acha que é só uma anotação.</span>
+                        }
+                      </div>
+                    }
+                  }
+                  @if (aiOn() && editable()) {
+                    <button type="button" class="small" [disabled]="suggesting()" (click)="suggestWithAi()">
+                      {{ suggesting() ? 'A IA local está olhando as formas…' : 'Sugerir componentes com a IA' }}
+                    </button>
+                  }
                 }
                 @if (v.findings.length > 0) {
                   <h4>Achados das regras</h4>

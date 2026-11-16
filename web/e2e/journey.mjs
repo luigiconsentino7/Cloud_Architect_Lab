@@ -3,7 +3,7 @@
 //   BASE_URL=http://localhost:5080 LAB_CLI="dotnet ../src/Lab.Cli/bin/Debug/net10.0/lab.dll" npm run e2e
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { api, base, injectReference, shots, waitFor, watchErrors } from './helpers.mjs';
+import { api, base, draftWithShapes, injectReference, shots, waitFor, watchErrors } from './helpers.mjs';
 
 /** Abre um desafio pela interface e injeta a solução de referência como desenho (o "usuário" dos testes). */
 async function openWithReference(page, seedTitle, difficulty) {
@@ -92,7 +92,20 @@ try {
   await page.waitForSelector('.excalidraw');
   assert.match(await page.locator('header.bar small').innerText(), /Sênior/, 'o desafio ajustado está no nível pedido');
 
-  // Jornada 5: perfil mostra nível, competências e histórico.
+  // Jornada 5: forma desenhada à mão vira componente com um clique; a validação ao vivo atualiza os problemas.
+  const shapes = await draftWithShapes(['Redis']);
+  await page.goto(`${base}/desafios/${shapes.challengeId}`);
+  await page.waitForSelector('.excalidraw');
+  await page.click('nav.tabs button:has-text("Problemas")');
+  await page.waitForSelector('.map-actions button:has-text("Mapear para Amazon ElastiCache")', { timeout: 15_000 });
+  await page.click('.map-actions button:has-text("Mapear para Amazon ElastiCache")');
+  await waitFor(async () => page.locator('.map-actions button').count(), (n) => n === 0, 15_000);
+  assert.equal(await page.locator('.problem:has-text("IR004")').count(), 0, 'a forma tipada some dos problemas sem clicar em Validar');
+  const typed = (await api(`/api/challenges/${shapes.challengeId}/attempts`)).at(-1).scene.elements.find((e) => e.id === 'shape_0');
+  assert.equal(typed?.customData?.catalogId, 'aws.elasticache', 'o rascunho salvo tem a forma tipada');
+  await page.screenshot({ path: `${shots}/mapeamento.png` });
+
+  // Jornada 6: perfil mostra nível, competências e histórico.
   await page.click('a:has-text("Perfil")');
   await page.waitForSelector('.level');
   assert.ok((await page.locator('.competency').count()) > 0, 'competências atualizadas');
