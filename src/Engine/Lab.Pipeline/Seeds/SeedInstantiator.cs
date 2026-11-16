@@ -194,18 +194,18 @@ public static partial class SeedInstantiator
     {
         var writer = new SceneWriter { CatalogVersion = catalog.Version };
         var ids = new Dictionary<string, string>(StringComparer.Ordinal);
-        var x = 0;
-        foreach (var item in reference["nodes"] as JsonArray ?? [])
+        var nodes = (reference["nodes"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+        var positions = Layout(nodes, reference["edges"] as JsonArray ?? []);
+        foreach (var raw in nodes)
         {
-            if (item is not JsonObject node) continue;
-            var id = Str(node["id"]) ?? throw new SeedException($"{seedId}: nó da referência sem 'id'.");
-            node = ForProvider(node, provider);
+            var id = Str(raw["id"]) ?? throw new SeedException($"{seedId}: nó da referência sem 'id'.");
+            var node = ForProvider(raw, provider);
             var label = Str(node["label"]) ?? id;
             var external = Str(node["external"]);
             var catalogId = external is not null ? "external.system" : ResolveComponent(node, provider, catalog, seedId, id);
             var config = node["config"]?.DeepClone() as JsonObject;
-            ids[id] = writer.Component(catalogId, label, x: x, y: 0, config: config, id: id, externalId: external);
-            x += 220;
+            var (x, y) = positions.GetValueOrDefault(id, (0, 0));
+            ids[id] = writer.Component(catalogId, label, x: x, y: y, config: config, id: id, externalId: external);
         }
 
         foreach (var item in reference["edges"] as JsonArray ?? [])
@@ -255,6 +255,48 @@ public static partial class SeedInstantiator
 
         foreach (var (key, value) in over) merged[key] = value?.DeepClone();
         return merged;
+    }
+
+    /// <summary>
+    /// Layout em camadas para desenhar a referência: clientes na coluna 0 e cada nó uma coluna depois do que o chama
+    /// (caminho mais longo, limitado para não girar em ciclo); nós sem ligação vão para uma última coluna.
+    /// </summary>
+    private static Dictionary<string, (double X, double Y)> Layout(IReadOnlyList<JsonObject> nodes, JsonArray edges)
+    {
+        var order = nodes.Select(n => Str(n["id"]) ?? "").Where(id => id.Length > 0).ToList();
+        var alias = nodes.Where(n => Str(n["external"]) is not null).ToDictionary(n => Str(n["external"])!, n => Str(n["id"])!, StringComparer.Ordinal);
+        string Resolve(string id) => alias.GetValueOrDefault(id, id);
+        var links = edges.OfType<JsonObject>()
+            .Select(e => (From: Resolve(Str(e["from"]) ?? ""), To: Resolve(Str(e["to"]) ?? "")))
+            .Where(l => order.Contains(l.From) && order.Contains(l.To) && l.From != l.To)
+            .ToList();
+        var layer = nodes.Where(n => (Str(n["component"]) ?? "").StartsWith("client.", StringComparison.Ordinal))
+            .ToDictionary(n => Str(n["id"])!, _ => 0, StringComparer.Ordinal);
+        for (var pass = 0; pass < order.Count; pass++)
+        {
+            var changed = false;
+            foreach (var (from, to) in links)
+            {
+                if (!layer.TryGetValue(from, out var l) || (layer.TryGetValue(to, out var current) && current >= l + 1)) continue;
+                layer[to] = l + 1;
+                changed = true;
+            }
+
+            if (!changed) break;
+        }
+
+        var last = layer.Count == 0 ? 0 : layer.Values.Max() + 1;
+        var rows = new Dictionary<int, int>();
+        var result = new Dictionary<string, (double, double)>(StringComparer.Ordinal);
+        foreach (var id in order)
+        {
+            var column = layer.GetValueOrDefault(id, last);
+            var row = rows.GetValueOrDefault(column);
+            rows[column] = row + 1;
+            result[id] = (80 + (column * 280), 80 + (row * 140));
+        }
+
+        return result;
     }
 
     private static string ResolveComponent(JsonObject node, CloudProvider provider, ComponentCatalog catalog, string seedId, string nodeId)

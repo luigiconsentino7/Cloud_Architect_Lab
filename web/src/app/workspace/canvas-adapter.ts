@@ -232,3 +232,94 @@ export function normalize(text: string): string {
 function slug(text: string): string {
   return normalize(text).replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'cmp';
 }
+
+/** Elementos gravados pelo próprio Excalidraw têm `seed` e `version`; os gerados pelo motor (referência, testes) não. */
+export function needsRestore(elements: readonly SceneElement[]): boolean {
+  return elements.some((e) => typeof e['seed'] !== 'number' || typeof e['version'] !== 'number');
+}
+
+/**
+ * Converte uma cena mínima (como a referência gerada pelo motor) em esqueletos para o `convertToExcalidrawElements`:
+ * retângulos com rótulo, setas ligadas aos componentes pelas pontas (a geometria é calculada pelo Excalidraw),
+ * frames com seus filhos e textos soltos.
+ */
+export function toSkeletons(elements: readonly SceneElement[]): Record<string, unknown>[] {
+  const items = live(elements);
+  const byId = new Map(items.map((e) => [e.id, e]));
+  const labels = new Map(items.filter((e) => e.type === 'text' && e.containerId).map((e) => [e.containerId!, (e.text as string | undefined) ?? '']));
+  const skeletons: Record<string, unknown>[] = [];
+  // Setas paralelas entre o mesmo par de componentes ganham um pequeno deslocamento para não se sobreporem.
+  const pairs = new Map<string, string[]>();
+  for (const arrow of items.filter((e) => e.type === 'arrow' && e.startBinding && e.endBinding)) {
+    const key = [arrow.startBinding!.elementId, arrow.endBinding!.elementId].sort().join('|');
+    pairs.set(key, [...(pairs.get(key) ?? []), arrow.id]);
+  }
+  const pairOffset = (arrow: SceneElement, from: SceneElement, to: SceneElement) => {
+    const siblings = pairs.get([from.id, to.id].sort().join('|')) ?? [arrow.id];
+    return (siblings.indexOf(arrow.id) - (siblings.length - 1) / 2) * 16;
+  };
+  for (const e of items) {
+    if (e.type === 'text' && e.containerId) continue;
+    const common = { id: e.id, x: e.x, y: e.y, customData: e.customData, groupIds: e.groupIds ?? [] };
+    if (e.type === 'arrow') {
+      const from = e.startBinding ? byId.get(e.startBinding.elementId) : undefined;
+      const to = e.endBinding ? byId.get(e.endBinding.elementId) : undefined;
+      const geometry = from && to ? arrowGeometry(from, to, pairOffset(e, from, to)) : {};
+      skeletons.push({
+        ...common,
+        ...geometry,
+        type: 'arrow',
+        strokeStyle: e['strokeStyle'] ?? 'solid',
+        start: e.startBinding ? { id: e.startBinding.elementId } : undefined,
+        end: e.endBinding ? { id: e.endBinding.elementId } : undefined,
+      });
+    } else if (e.type === 'frame') {
+      skeletons.push({ ...common, type: 'frame', name: e['name'], width: e.width, height: e.height, children: items.filter((c) => c['frameId'] === e.id).map((c) => c.id) });
+    } else if (e.type === 'text') {
+      skeletons.push({ ...common, type: 'text', text: e.text ?? '' });
+    } else {
+      const component = componentData(e);
+      skeletons.push({
+        ...common,
+        type: e.type,
+        width: e.width,
+        height: e.height,
+        backgroundColor: component ? (component.externalId ? colorFor('externos') : '#f1f3f5') : 'transparent',
+        fillStyle: 'solid',
+        roundness: { type: 3 },
+        label: labels.has(e.id) ? { text: labels.get(e.id), fontSize: 16 } : undefined,
+      });
+    }
+  }
+  return skeletons;
+}
+
+/**
+ * Pontos de uma seta entre duas caixas: sai da borda da origem voltada para o destino e chega na borda oposta
+ * (horizontal quando estão lado a lado, vertical quando estão empilhadas). `offset` afasta setas paralelas.
+ */
+export function arrowGeometry(
+  from: Pick<SceneElement, 'x' | 'y' | 'width' | 'height'>,
+  to: Pick<SceneElement, 'x' | 'y' | 'width' | 'height'>,
+  offset = 0,
+): { x: number; y: number; width: number; height: number; points: [number, number][] } {
+  const gap = 6;
+  const fromCenter = { x: from.x + from.width / 2, y: from.y + from.height / 2 };
+  const toCenter = { x: to.x + to.width / 2, y: to.y + to.height / 2 };
+  const horizontal = Math.abs(toCenter.x - fromCenter.x) >= Math.abs(toCenter.y - fromCenter.y);
+  let start: { x: number; y: number };
+  let end: { x: number; y: number };
+  if (horizontal) {
+    const right = toCenter.x >= fromCenter.x;
+    start = { x: right ? from.x + from.width + gap : from.x - gap, y: fromCenter.y + offset };
+    end = { x: right ? to.x - gap : to.x + to.width + gap, y: toCenter.y + offset };
+  } else {
+    const down = toCenter.y >= fromCenter.y;
+    start = { x: fromCenter.x + offset, y: down ? from.y + from.height + gap : from.y - gap };
+    end = { x: toCenter.x + offset, y: down ? to.y - gap : to.y + to.height + gap };
+  }
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  return { x: start.x, y: start.y, width: Math.abs(dx), height: Math.abs(dy), points: [[0, 0], [dx, dy]] };
+}
+

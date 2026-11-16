@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, afterNextRen
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { Root } from 'react-dom/client';
 import { ExcalidrawScene, SceneElement } from '../core/models';
-import { arrowsMissingConnectionData, sceneSignature } from './canvas-adapter';
+import { arrowsMissingConnectionData, needsRestore, sceneSignature, toSkeletons } from './canvas-adapter';
 
 type ExcalidrawModule = typeof import('@excalidraw/excalidraw');
 
@@ -110,17 +110,24 @@ export class CanvasComponent implements OnDestroy {
     const client = interop(clientModule);
     this.excalidraw = excalidraw;
     const initial = this.scene();
+    const elements = initial?.elements ?? [];
+    // Cena gerada pelo motor (sem seed/version): vira esqueletos e o Excalidraw completa geometria e vínculos.
+    const initialElements = needsRestore(elements)
+      ? excalidraw.convertToExcalidrawElements(toSkeletons(elements) as never, { regenerateIds: false })
+      : elements;
     this.root = client.createRoot(this.host().nativeElement);
     this.root.render(
       react.createElement(excalidraw.Excalidraw, {
         initialData: {
-          elements: (initial?.elements ?? []) as never,
+          elements: initialElements as never,
           appState: { ...(initial?.appState ?? {}), viewModeEnabled: this.readOnly() } as never,
           scrollToContent: true,
         },
         excalidrawAPI: (api: ExcalidrawImperativeAPI) => {
           this.api = api;
           this.loading.set(false);
+          // Enquadra o desenho todo ao abrir (o scrollToContent do initialData só centraliza em 100%).
+          if (initialElements.length > 0) setTimeout(() => api.scrollToContent(undefined, { fitToContent: true }), 50);
         },
         onChange: (elements, appState) => this.onChange(elements as unknown as readonly SceneElement[], Object.keys(appState.selectedElementIds ?? {})),
         langCode: 'pt-BR',
