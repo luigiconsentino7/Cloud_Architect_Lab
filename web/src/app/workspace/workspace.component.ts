@@ -4,7 +4,7 @@ import { ApiService, problemMessage } from '../core/api.service';
 import { difficultyName, fmt, metricName, modeName, providerName, sloTarget } from '../core/format';
 import { Attempt, Challenge, FlowDefinition, Hint, MappingOption, Palette, PaletteComponent, SceneElement, Validation } from '../core/models';
 import { CanvasComponent } from './canvas.component';
-import { Selection, componentData, componentSkeleton, connectionIdOf, elementsForIrIds, externalSkeleton, freePosition, live, nextComponentId, normalize, selectionOf, typedShape, withCustomData } from './canvas-adapter';
+import { Selection, boundarySkeleton, componentData, componentSkeleton, connectionIdOf, elementsForIrIds, externalSkeleton, freePosition, live, nextComponentId, normalize, selectionOf, typedShape, withCustomData } from './canvas-adapter';
 import { FlowsComponent } from './flows.component';
 import { CustomDataChange, InspectorComponent } from './inspector.component';
 import { ChatComponent } from '../shared/chat.component';
@@ -133,6 +133,15 @@ export class WorkspaceComponent implements OnDestroy {
     const elements = canvas.elements();
     const componentId = nextComponentId(elements, component.id);
     canvas.add([componentSkeleton(component, freePosition(elements, canvas.viewportCenter()), componentId, this.palette()?.catalogVersion ?? '')]);
+  }
+
+  /** Frame de zona (AZ) ou região perto do centro da área visível; o usuário arrasta os componentes para dentro. */
+  protected addBoundary(kind: 'zone' | 'region', value: string): void {
+    const canvas = this.canvas();
+    if (!canvas || !this.editable()) return;
+    const center = canvas.viewportCenter();
+    const size = kind === 'zone' ? { w: 560, h: 400 } : { w: 1240, h: 560 };
+    canvas.add([boundarySkeleton(kind, value, { x: center.x - size.w / 2, y: center.y - size.h / 2 }, Date.now().toString(36))]);
   }
 
   protected addExternal(index: number): void {

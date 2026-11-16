@@ -14,6 +14,22 @@ public sealed class SecurityAndContentTests : IAsyncLifetime
     public ValueTask DisposeAsync() => _factory.DisposeAsync();
 
     [Fact]
+    public async Task Respostas_levam_csp_e_cabecalhos_de_seguranca()
+    {
+        var response = await _factory.CreateClient().GetAsync("/api/health");
+
+        var csp = string.Join(' ', response.Headers.GetValues("Content-Security-Policy"));
+        csp.ShouldContain("default-src 'self'");
+        csp.ShouldContain("script-src 'self' 'wasm-unsafe-eval'");
+        csp.ShouldNotContain("'unsafe-eval'");
+        csp.ShouldContain("frame-ancestors 'none'");
+        csp.ShouldContain("connect-src 'self' ws://localhost:");
+        response.Headers.GetValues("X-Content-Type-Options").ShouldBe(["nosniff"]);
+        response.Headers.GetValues("X-Frame-Options").ShouldBe(["DENY"]);
+        response.Headers.GetValues("Referrer-Policy").ShouldBe(["no-referrer"]);
+    }
+
+    [Fact]
     public async Task Writes_without_the_client_header_are_refused()
     {
         var plain = _factory.CreateClient();

@@ -87,7 +87,7 @@ try {
   const narrator = ollama.requests.find((r) => r.messages[0].content.startsWith('Você é um mentor'));
   assert.ok(narrator?.format?.properties?.paragraphs, 'o narrador manda o JSON Schema da narrativa');
 
-  assert.deepEqual(errors, [], 'sem erros no console');
+  assert.deepEqual(errors, [], 'sem erros no console: ' + JSON.stringify(errors).slice(0, 1500));
   console.log(`✓ jornadas com IA ok (nota ${score}, ${ollama.requests.length} chamadas ao Ollama de mentira)`);
 } catch (error) {
   await page.screenshot({ path: `${shots}/falha-ia.png` }).catch(() => undefined);

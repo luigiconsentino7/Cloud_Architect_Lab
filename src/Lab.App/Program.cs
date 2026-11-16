@@ -44,6 +44,34 @@ var app = builder.Build();
 await app.Services.InitializeDatabaseAsync();
 
 app.UseHostFiltering();
+
+// CSP restritiva (spec 09): só scripts do próprio app (o Excalidraw usa WebAssembly para as fontes na exportação),
+// estilos inline (componentes Angular e o Excalidraw), WebSocket do SignalR no próprio host e nada de iframes.
+var contentSecurityPolicy = string.Join("; ",
+    "default-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    $"connect-src 'self' ws://localhost:{port} ws://127.0.0.1:{port}",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'");
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        var headers = context.Response.Headers;
+        headers.ContentSecurityPolicy = contentSecurityPolicy;
+        headers.XContentTypeOptions = "nosniff";
+        headers.XFrameOptions = "DENY";
+        headers["Referrer-Policy"] = "no-referrer";
+        return Task.CompletedTask;
+    });
+    await next();
+});
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 var allowed = builder.Configuration.GetSection("Lab:AllowedOrigins").Get<string[]>() ?? [];

@@ -203,6 +203,12 @@
                   <button type="button" class="item external" [disabled]="!editable()" (click)="addExternal(i)">{{ system.name }}</button>
                 }
               }
+              <h4>Fronteiras</h4>
+              <p class="hint-text">Arraste os componentes para dentro: o que fica na zona ou na região entra nos testes de queda de AZ e de região.</p>
+              @for (zone of ['a', 'b', 'c']; track zone) {
+                <button type="button" class="item boundary" [disabled]="!editable()" (click)="addBoundary('zone', zone)">AZ {{ zone }}</button>
+              }
+              <button type="button" class="item boundary" [disabled]="!editable()" (click)="addBoundary('region', c.region)">Região {{ c.region }}</button>
               @for (group of paletteGroups(); track group.key) {
                 <h4>{{ group.name }}</h4>
                 @for (component of group.items; track component.id) {

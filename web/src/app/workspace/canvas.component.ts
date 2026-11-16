@@ -106,6 +106,7 @@ export class CanvasComponent implements OnDestroy {
   private async mount(): Promise<void> {
     // Assets do Excalidraw (fontes e CSS) servidos pelo próprio app: nada vem de CDN.
     (window as unknown as { EXCALIDRAW_ASSET_PATH: string }).EXCALIDRAW_ASSET_PATH = '/excalidraw/';
+    keepFontsLocal();
     ensureStylesheet('/excalidraw/index.css');
     const [reactModule, clientModule, excalidraw] = await Promise.all([import('react'), import('react-dom/client'), import('@excalidraw/excalidraw')]);
     // React e ReactDOM são CommonJS: no import dinâmico, as funções podem vir dentro de `default`.
@@ -183,6 +184,29 @@ export class CanvasComponent implements OnDestroy {
     if (loading) this.sceneLoad.emit(elements);
     else this.sceneChange.emit(elements);
   }
+}
+
+/**
+ * O Excalidraw 0.18 sempre acrescenta o CDN esm.sh como segunda origem de cada fonte do canvas, e o Chrome chega a
+ * pedir as duas. O app serve todas as fontes em /excalidraw/fonts: tira o CDN da lista, para nada sair da máquina
+ * (o CSP também o bloquearia).
+ */
+export function keepFontsLocal(target: { FontFace: typeof FontFace } = window): void {
+  const original = target.FontFace as typeof FontFace & { labLocalOnly?: boolean };
+  if (original.labLocalOnly) return;
+  const patched = function (family: string, source: string | BufferSource, descriptors?: FontFaceDescriptors) {
+    return new original(family, typeof source === 'string' ? localSources(source) : source, descriptors);
+  } as unknown as typeof FontFace & { labLocalOnly?: boolean };
+  patched.prototype = original.prototype;
+  patched.labLocalOnly = true;
+  target.FontFace = patched;
+}
+
+/** `url(local) format('woff2'), url(https://esm.sh/…) format('woff2')` → só a origem local. */
+export function localSources(source: string): string {
+  const sources = source.split(/,\s*(?=url\()/);
+  const local = sources.filter((s) => !/url\(\s*['"]?https?:\/\/esm\.sh\//.test(s));
+  return local.length > 0 ? local.join(', ') : source;
 }
 
 function excalifontLoaded(): boolean {

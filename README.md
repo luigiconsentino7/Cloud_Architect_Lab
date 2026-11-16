@@ -20,7 +20,8 @@ conquistas.
 - **IA opcional e local.** Com o [Ollama](https://ollama.com), um modelo de 3–4B na sua GPU personaliza o enunciado,
   responde como entrevistador e comenta a revisão. Sem IA, o app usa a busca guiada e as respostas curadas. Nos dois
   modos, a IA nunca mexe na nota.
-- **Custo zero e privado.** Um processo .NET e um arquivo SQLite na sua máquina; nada sai dela.
+- **Custo zero e privado.** Um processo .NET e um arquivo SQLite na sua máquina; nada sai dela (nem as fontes do
+  canvas vêm de CDN, e uma CSP restritiva garante isso). Backup completo para exportar e importar no perfil.
 
 ## Rodar
 
@@ -65,6 +66,8 @@ Abrir o `Lab.App.exe` sobe o servidor e abre o navegador.
 | Contexto → desafio | Busca na biblioteca pelos termos do contexto | Escolhe a semente e devolve só um delta (narrativa, variáveis dentro das faixas, pegadinhas); o desafio é montado e validado pelo motor |
 | Entrevistador | Responde com os esclarecimentos curados do desafio | Conversa livre, só com a parte pública do desafio (não conhece a referência nem os cenários ocultos) |
 | Comentário do mentor | — (a revisão determinística continua lá) | Reescreve a revisão em texto corrido; só aparece se citar apenas números que estão na revisão |
+| Forma desenhada à mão | Sugestão pelo nome (aliases do catálogo) | Para rótulos que o catálogo não reconhece, sugere um serviço da paleta (ou diz que é só anotação) |
+| "Ajustar" o desafio | Nuvem, nível, números e pegadinhas pelos controles | Também por pedido em texto ("mais volume, com auditoria") |
 | Nota, testes e revisão | Determinísticos | Determinísticos |
 
 Configuração (`src/Lab.App/appsettings.json` ou variáveis de ambiente):
@@ -78,6 +81,20 @@ Configuração (`src/Lab.App/appsettings.json` ou variáveis de ambiente):
 
 Os prompts são versionados em `content/prompts/<papel>/v<n>.md` e a versão usada fica gravada junto com o desafio ou a
 narrativa.
+
+**Qual modelo usar?** Compare os modelos na sua máquina com os datasets de `content/evals` (o spike S4 da spec):
+
+```bash
+ollama pull gemma3:4b
+```
+
+```bash
+./lab.sh ai eval --models qwen2.5:3b,gemma3:4b
+```
+
+O relatório (em `exports/evals/`) mostra, por modelo, deltas válidos e aderentes ao contexto, respostas certas e sem
+vazamento do entrevistador, narrativas aceitas, mapeamentos certos, tempo até o primeiro token e tokens por segundo,
+e sugere o padrão pelos critérios do S4 (personalizador ≥ 80% de primeira, primeiro token ≤ 3 s, ≥ 15 tokens/s).
 
 ## Desenvolvimento
 
@@ -151,6 +168,7 @@ Na raiz do repositório, `./lab.sh` (Linux, macOS, Git Bash) ou `lab` (Windows, 
 ./lab.sh evaluate pix/envio-pix --reference --difficulty senior
 ./lab.sh rules validate
 ./lab.sh catalog validate
+./lab.sh ai eval --models qwen2.5:3b,gemma3:4b
 ```
 
 `challenge validate` sem `--quick` roda a solução de referência de cada semente nas três nuvens, nos cantos das faixas
@@ -171,7 +189,8 @@ O conteúdo é escrito com o Claude Code no próprio repositório (uso normal do
 
 O GitHub Actions (`.github/workflows/ci.yml`) roda build com warnings como erro, `dotnet format`, todos os testes,
 validação de conteúdo (`rules`, `catalog` e `challenge validate --quick`), pacotes vulneráveis, Vitest, build e
-auditoria do frontend, e as jornadas E2E nos modos sem IA e com o Ollama simulado. Na `main`, publica os executáveis.
+auditoria do frontend, as jornadas E2E nos modos sem IA e com o Ollama simulado e o `lab ai eval` contra esse mesmo
+Ollama simulado. Na `main`, publica os executáveis.
 O CI nunca chama um modelo de verdade.
 
 ## Documentação

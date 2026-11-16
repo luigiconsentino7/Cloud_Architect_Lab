@@ -2,6 +2,7 @@ import { SceneElement } from '../core/models';
 import {
   arrowGeometry,
   arrowsMissingConnectionData,
+  boundarySkeleton,
   componentSkeleton,
   connectionIdOf,
   elementsForIrIds,
@@ -144,6 +145,15 @@ describe('canvas-adapter', () => {
     expect([typed.x, typed.y, typed.width]).toEqual([40, 60, 120]);
     expect(typed['version']).toBe(4);
     expect(selection?.kind === 'component' && selection.label).toBe('Redis');
+  });
+
+  it('cria a fronteira de zona e de região como frame que o compilador entende', () => {
+    const zone = boundarySkeleton('zone', 'b', { x: 10, y: 20 }, 'x1');
+    const region = boundarySkeleton('region', 'sa-east-1', { x: 0, y: 0 }, 'x2');
+
+    expect(zone).toMatchObject({ type: 'frame', name: 'AZ b', children: [], customData: { kind: 'boundary', boundaryType: 'zone', zone: 'b' } });
+    expect(region).toMatchObject({ name: 'Região sa-east-1', customData: { boundaryType: 'region', region: 'sa-east-1' } });
+    expect(region['width'] as number).toBeGreaterThan(zone['width'] as number);
   });
 
   it('sugere o fluxo percorrendo as setas a partir do cliente de entrada', () => {

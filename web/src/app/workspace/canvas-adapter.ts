@@ -185,6 +185,24 @@ export function elementsForIrIds(elements: readonly SceneElement[], irIds: reado
 
 /** Cópia do elemento com customData novo e versão incrementada (o Excalidraw só aplica mudanças com versão nova). */
 /**
+ * Fronteira de zona (AZ) ou região como frame do Excalidraw: o compilador lê o customData (e o nome, se o customData
+ * se perder) e os componentes arrastados para dentro do frame ficam naquela zona ou região.
+ */
+export function boundarySkeleton(kind: 'zone' | 'region', value: string, position: { x: number; y: number }, suffix: string): Record<string, unknown> {
+  return {
+    type: 'frame',
+    id: `frame_${kind}_${value}_${suffix}`,
+    x: position.x,
+    y: position.y,
+    width: kind === 'zone' ? 560 : 1240,
+    height: kind === 'zone' ? 400 : 560,
+    name: kind === 'zone' ? `AZ ${value}` : `Região ${value}`,
+    children: [],
+    customData: kind === 'zone' ? { kind: 'boundary', boundaryType: 'zone', zone: value } : { kind: 'boundary', boundaryType: 'region', region: value },
+  };
+}
+
+/**
  * Tipa uma forma desenhada à mão: vira o componente do catálogo com o mesmo lugar, tamanho, rótulo e setas, e ganha a
  * cor da categoria (como os componentes da paleta).
  */

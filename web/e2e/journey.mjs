@@ -3,7 +3,7 @@
 //   BASE_URL=http://localhost:5080 LAB_CLI="dotnet ../src/Lab.Cli/bin/Debug/net10.0/lab.dll" npm run e2e
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { api, base, draftWithShapes, injectReference, shots, waitFor, watchErrors } from './helpers.mjs';
+import { api, base, draftWithShapes, headers, injectReference, shots, waitFor, watchErrors } from './helpers.mjs';
 
 /** Abre um desafio pela interface e injeta a solução de referência como desenho (o "usuário" dos testes). */
 async function openWithReference(page, seedTitle, difficulty) {
@@ -105,6 +105,18 @@ try {
   assert.equal(typed?.customData?.catalogId, 'aws.elasticache', 'o rascunho salvo tem a forma tipada');
   await page.screenshot({ path: `${shots}/mapeamento.png` });
 
+  // Fronteira de zona pela paleta: vira frame com customData de AZ, que o compilador lê como fronteira.
+  await page.click('nav.tabs button:has-text("Paleta")');
+  await page.click('.palette button.boundary:has-text("AZ b")');
+  const frame = await waitFor(
+    async () => (await api(`/api/challenges/${shapes.challengeId}/attempts`)).at(-1).scene.elements.find((e) => e.type === 'frame' && !e.isDeleted),
+    (f) => !!f,
+    15_000,
+  );
+  assert.equal(frame?.customData?.zone, 'b', 'o frame da AZ é salvo com o customData da fronteira');
+  const compiled = await api(`/api/attempts/${(await api(`/api/challenges/${shapes.challengeId}/attempts`)).at(-1).id}/validate`, { method: 'POST', headers, body: '{}' });
+  assert.ok(compiled.graph.boundaries.some((b) => b.type === 'zone' && b.zone === 'b'), 'o compilador reconhece a AZ');
+
   // Jornada 6: perfil mostra nível, competências e histórico.
   await page.click('a:has-text("Perfil")');
   await page.waitForSelector('.level');
@@ -122,7 +134,7 @@ try {
   await page.waitForSelector('.data-message:has-text("Backup importado")', { timeout: 30_000 });
   assert.equal((await api('/api/me/progress')).summary.totalXp, xpBeforeBackup, 'XP continua o mesmo depois de importar');
 
-  assert.deepEqual(errors, [], 'sem erros no console');
+  assert.deepEqual(errors, [], 'sem erros no console: ' + JSON.stringify(errors).slice(0, 1500));
   console.log(`✓ jornadas ponta a ponta ok (nota ${score}, XP ${xpBefore} → ${xpAfterSubmission})`);
 } catch (error) {
   await page.screenshot({ path: `${shots}/falha.png` }).catch(() => undefined);
