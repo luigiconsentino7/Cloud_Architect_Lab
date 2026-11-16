@@ -1,0 +1,13 @@
+.top { height: var(--header-height); display: flex; align-items: center; gap: 22px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--surface); position: sticky; top: 0; z-index: 10; }
+.brand { font-weight: 800; text-decoration: none; color: var(--text); }
+nav { display: flex; gap: 14px; }
+nav a { text-decoration: none; color: var(--muted); font-size: 14px; }
+nav a.active { color: var(--text); font-weight: 600; }
+.progress { margin-left: auto; display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); font-size: 13px; }
+.progress .bar { width: 120px; height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; display: inline-block; }
+.progress .bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #ae3ec9); }
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+.toast { padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--surface); box-shadow: 0 6px 24px rgb(0 0 0 / 0.18); font-size: 14px; }
+.toast-xp { background: var(--accent); color: white; }
+.toast-level, .toast-achievement { background: #7048e8; color: white; }
+.toast-error { background: var(--danger); color: white; }

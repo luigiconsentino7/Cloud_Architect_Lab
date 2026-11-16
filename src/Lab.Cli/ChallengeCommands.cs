@@ -84,6 +84,17 @@ public static class ChallengeCommands
         return 0;
     }
 
+    /// <summary>A referência desenhada (cena do Excalidraw + fluxos), para testes ponta a ponta e para conferir a semente no canvas.</summary>
+    public static int Scene(string contentRoot, Args args)
+    {
+        var content = ContentRepository.Load(contentRoot);
+        var seed = SelectSeeds(content, args.Positionals.Skip(1).Take(1).ToList()).Single();
+        var instance = SeedInstantiator.Instantiate(Request(seed, args), content.Catalog);
+        if (instance.ReferenceScene is null) throw new UsageException($"{seed.Id} não tem solução de referência.");
+        Console.WriteLine(JsonSerializer.Serialize(new { scene = instance.ReferenceScene, flows = instance.ReferenceFlows }, LabJson.Options));
+        return 0;
+    }
+
     public static InstantiationRequest Request(Seed seed, Args args)
     {
         var variables = new Dictionary<string, double>(StringComparer.Ordinal);

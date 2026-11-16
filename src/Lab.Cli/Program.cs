@@ -12,6 +12,7 @@ const string Usage = """
       lab challenge list
       lab challenge validate [semente|arquivo ...] [--quick] [--provider aws,azure,gcp] [--difficulty senior] [--no-twists]
       lab challenge show <semente> [--provider aws] [--difficulty senior] [--twist id] [--var nome=valor] [--variation n]
+      lab challenge scene <semente> [mesmas opções]   # a referência como cena do canvas + fluxos (JSON)
       lab rules validate
       lab catalog validate
       lab evaluate <semente> [--reference | --scene cena.json] [--provider aws] [--difficulty senior] [--out exports/]
@@ -39,6 +40,7 @@ try
         ("challenge", "list") => ChallengeCommands.List(contentRoot),
         ("challenge", "validate") => ChallengeCommands.Validate(contentRoot, parsed),
         ("challenge", "show") => ChallengeCommands.Show(contentRoot, parsed),
+        ("challenge", "scene") => ChallengeCommands.Scene(contentRoot, parsed),
         ("rules", "validate") => ContentCommands.ValidateRules(contentRoot),
         ("catalog", "validate") => ContentCommands.ValidateCatalog(contentRoot),
         ("evaluate", _) => EvaluateCommand.Run(contentRoot, parsed),

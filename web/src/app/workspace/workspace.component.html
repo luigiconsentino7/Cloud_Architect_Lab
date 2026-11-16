@@ -1,0 +1,257 @@
+@if (loadError(); as error) {
+  <div class="page-error">
+    <p>{{ error }}</p>
+    <a routerLink="/">Voltar ao início</a>
+  </div>
+} @else if (challenge(); as c) {
+  <div class="workspace">
+    <header class="bar">
+      <div class="title">
+        <a routerLink="/" class="back" title="Início">←</a>
+        <div>
+          <h1>{{ c.title }}</h1>
+          <small>
+            {{ providerName[c.provider] }} · {{ difficultyName[c.difficulty] }} · {{ modeName[c.mode] }} · {{ c.region }}
+            @if (attempt(); as a) {
+              · tentativa {{ a.number }}
+            }
+          </small>
+        </div>
+      </div>
+      <div class="actions">
+        <span class="save save-{{ saveState() }}">
+          @switch (saveState()) {
+            @case ('saved') { Salvo }
+            @case ('dirty') { Alterações não salvas }
+            @case ('saving') { Salvando… }
+            @case ('error') { Falha ao salvar }
+            @case ('conflict') {
+              Editado em outra aba:
+              <button type="button" class="link" (click)="keepMine()">manter a minha</button> ·
+              <button type="button" class="link" (click)="reloadTheirs()">carregar a outra</button>
+            }
+          }
+        </span>
+        @if (editable()) {
+          <button type="button" (click)="validate()" [disabled]="!!busy()">Validar</button>
+          @if (c.mode === 'treino') {
+            <button type="button" (click)="simulate()" [disabled]="!!busy()" title="Roda só os cenários públicos; não rende XP">Simular</button>
+          }
+          <button type="button" (click)="hint()" [disabled]="!!busy() || (attempt()?.hintLevelsUsed?.length ?? 0) >= c.hintCount">
+            Dica ({{ c.hintCount - (attempt()?.hintLevelsUsed?.length ?? 0) }})
+          </button>
+          <button type="button" class="primary" (click)="submit()" [disabled]="!!busy()">Submeter</button>
+        } @else if (attempt(); as a) {
+          @if (a.submissionEvaluationId) {
+            <a class="button primary" [routerLink]="['/avaliacoes', a.submissionEvaluationId]">Ver resultado</a>
+          }
+          <button type="button" (click)="newAttempt()" [disabled]="!!busy()">Nova tentativa</button>
+        }
+      </div>
+    </header>
+
+    @if (busy() || message()) {
+      <div class="notice" [class.error]="!!message()">{{ busy() ?? message() }}</div>
+    }
+
+    <aside class="left">
+      <nav class="tabs">
+        <button type="button" [class.active]="tab() === 'brief'" (click)="setTab('brief')">Enunciado</button>
+        <button type="button" [class.active]="tab() === 'palette'" (click)="setTab('palette')">Paleta</button>
+        <button type="button" [class.active]="tab() === 'flows'" (click)="setTab('flows')">Fluxos</button>
+        <button type="button" [class.active]="tab() === 'problems'" (click)="setTab('problems')">
+          Problemas
+          @if (validation(); as v) {
+            <span class="count" [class.bad]="errors() > 0">{{ v.diagnostics.length + v.findings.length }}</span>
+          }
+        </button>
+      </nav>
+
+      <div class="panel">
+        @switch (tab()) {
+          @case ('brief') {
+            <section class="brief">
+              @for (hint of hints(); track hint.level) {
+                <div class="hint-box"><strong>Dica {{ hint.level }}:</strong> {{ hint.text }}</div>
+              }
+              <p class="summary">{{ c.summary }}</p>
+              @for (paragraph of c.narrative.split('\n\n'); track $index) {
+                <p>{{ paragraph }}</p>
+              }
+
+              <h3>Casos de uso</h3>
+              @for (uc of c.useCases; track uc.id) {
+                <div class="uc">
+                  <strong>{{ uc.id }} · {{ uc.name }}</strong>
+                  @if (uc.monetary) {
+                    <span class="tag money">monetário</span>
+                  }
+                  @if (uc.requiresOrdering) {
+                    <span class="tag">exige ordem</span>
+                  }
+                  <div class="muted">{{ uc.description }} Entra por <code>{{ uc.entryClient }}</code>.</div>
+                  @if (uc.requiredCapabilities.length > 0) {
+                    <ul>
+                      @for (req of uc.requiredCapabilities; track $index) {
+                        <li>{{ req.description ?? req.capability }}</li>
+                      }
+                      @for (neg of uc.negativePaths; track $index) {
+                        <li>{{ neg.description || 'Tratar a falha de ' + neg.dependency }}</li>
+                      }
+                    </ul>
+                  }
+                </div>
+              }
+
+              <h3>Carga e SLOs</h3>
+              <p>Base de <strong>{{ fmt.int(c.workload.baselineRps) }} req/s</strong>.</p>
+              <table class="slos">
+                <tbody>
+                  @for (slo of c.slos; track slo.id) {
+                    <tr>
+                      <td>{{ slo.id }}</td>
+                      <td>{{ slo.useCase ?? 'todos' }} · {{ metricName[slo.metric] ?? slo.metric }}</td>
+                      <td>{{ sloTarget(slo.metric, slo.max, slo.min) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+              <p class="muted">
+                Cenários públicos: {{ scenarioNames(c) }}.
+                @if (c.hiddenScenarios > 0) {
+                  E mais {{ c.hiddenScenarios }} cenário(s) oculto(s) na submissão — pense no que pode dar errado.
+                }
+              </p>
+
+              @if (c.externalSystems.length > 0) {
+                <h3>Sistemas externos</h3>
+                @for (system of c.externalSystems; track system.id) {
+                  <div class="uc">
+                    <strong>{{ system.name }}</strong> <code>{{ system.id }}</code>
+                    <div class="muted">
+                      p50 {{ fmt.ms(system.latency.p50) }} · p99 {{ fmt.ms(system.latency.p99) }} · disponibilidade {{ fmt.pct(system.availability) }}
+                      @if (system.rateLimitRps) {
+                        · limite {{ fmt.int(system.rateLimitRps) }} req/s
+                      }
+                    </div>
+                  </div>
+                }
+              }
+
+              <h3>Restrições</h3>
+              <ul>
+                <li>Orçamento: {{ fmt.usd(c.constraints.budgetUsdMonth) }}/mês</li>
+                @if (c.constraints.dataResidencyBrazil) {
+                  <li>Dados no Brasil ({{ c.region }})</li>
+                }
+                @if (c.constraints.requireEncryptionAtRest) {
+                  <li>Criptografia em repouso</li>
+                }
+                @if (c.constraints.requireAuditLog) {
+                  <li>Trilha de auditoria imutável</li>
+                }
+                @if (c.constraints.rpoSeconds === 0) {
+                  <li>RPO zero</li>
+                }
+                @if (c.constraints.compliance.length > 0) {
+                  <li>Compliance: {{ c.constraints.compliance.join(', ') }}</li>
+                }
+              </ul>
+
+              @if (c.clarifications.length > 0) {
+                <h3>Perguntas frequentes</h3>
+                @for (q of c.clarifications; track $index) {
+                  <details>
+                    <summary>{{ q.question }}</summary>
+                    <p>{{ q.answer }}</p>
+                  </details>
+                }
+              }
+            </section>
+          }
+          @case ('palette') {
+            <section class="palette">
+              <input type="search" placeholder="Buscar serviço (fila, Lambda, cache…)" [value]="paletteFilter()" (input)="paletteFilter.set($any($event.target).value)" />
+              @if (c.externalSystems.length > 0) {
+                <h4>Externos do desafio</h4>
+                @for (system of c.externalSystems; track system.id; let i = $index) {
+                  <button type="button" class="item external" [disabled]="!editable()" (click)="addExternal(i)">{{ system.name }}</button>
+                }
+              }
+              @for (group of paletteGroups(); track group.key) {
+                <h4>{{ group.name }}</h4>
+                @for (component of group.items; track component.id) {
+                  <button type="button" class="item" [disabled]="!editable()" [title]="component.displayName" (click)="add(component)">
+                    {{ component.shortName ?? component.displayName }}
+                    <small>{{ component.archetype }}</small>
+                  </button>
+                }
+              }
+            </section>
+          }
+          @case ('flows') {
+            <lab-flows
+              [useCases]="c.useCases"
+              [flows]="flows()"
+              [elements]="elements()"
+              [selectedConnection]="selectedConnection()"
+              (flowsChange)="onFlows($event)"
+              (highlight)="highlight($event)"
+            />
+          }
+          @case ('problems') {
+            <section class="problems">
+              @if (validation(); as v) {
+                @if (v.diagnostics.length === 0 && v.findings.length === 0) {
+                  <p class="ok">Nenhum problema no desenho. Agora confira os fluxos e simule.</p>
+                }
+                @for (d of v.diagnostics; track $index) {
+                  <button type="button" class="problem {{ d.severity }}" (click)="highlight(d.irIds, d.elementIds)">
+                    <span class="code">{{ d.code }}</span> {{ d.message }}
+                  </button>
+                }
+                @if (v.findings.length > 0) {
+                  <h4>Achados das regras</h4>
+                }
+                @for (f of v.findings; track $index) {
+                  <button type="button" class="problem finding {{ f.severity }}" (click)="highlightPair(f.nodeIds, f.edgeIds)">
+                    <span class="code">{{ f.ruleId }}</span> <strong>{{ f.title }}</strong>
+                    <span class="detail">{{ f.message }}</span>
+                  </button>
+                }
+                <h4>Testes funcionais</h4>
+                @for (r of v.functional; track r.useCaseId) {
+                  <div class="functional {{ r.status }}">
+                    <strong>{{ r.useCaseId }} · {{ r.name }}</strong> — {{ r.status === 'passed' ? 'ok' : r.status === 'partial' ? 'parcial' : 'reprovado' }}
+                    <ul>
+                      @for (p of r.pathProblems; track $index) {
+                        <li class="bad">{{ p }}</li>
+                      }
+                      @for (cap of r.capabilities.concat(r.negativePaths); track $index) {
+                        <li [class.bad]="!cap.satisfied" (click)="highlightPair(cap.nodeIds, cap.edgeIds)">{{ cap.satisfied ? '✓' : '✗' }} {{ cap.detail }}</li>
+                      }
+                    </ul>
+                  </div>
+                }
+              } @else {
+                <p class="muted">Clique em <strong>Validar</strong> para compilar o desenho e rodar as regras e os testes funcionais (sem simular).</p>
+              }
+            </section>
+          }
+        }
+      </div>
+    </aside>
+
+    <main class="canvas">
+      @if (attempt(); as a) {
+        <lab-canvas [scene]="a.scene" [readOnly]="!editable()" (sceneChange)="onScene($event)" (selectionChange)="onSelection($event)" />
+      }
+    </main>
+
+    <aside class="right">
+      <lab-inspector [selection]="selection()" [palette]="palette()" [elements]="elements()" (customDataChange)="onCustomData($event)" />
+    </aside>
+  </div>
+} @else {
+  <div class="page-loading">Carregando o desafio…</div>
+}
