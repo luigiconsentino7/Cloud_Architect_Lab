@@ -40,6 +40,21 @@ public sealed partial class AiEvalTests
         markdown.ShouldContain("Sugestão de modelo padrão: **modelo-certo**");
     }
 
+    [Theory]
+    [InlineData("eval --models qwen2.5:3b,gemma3:4b")]
+    [InlineData("eval --models qwen2.5:3b gemma3:4b")] // PowerShell: a,b sem aspas vira dois argumentos
+    [InlineData("eval --models qwen2.5:3b --models gemma3:4b")]
+    public void Aceita_os_modelos_do_jeito_que_cada_terminal_manda(string line)
+    {
+        AiEvalCommand.Models(Args.Parse(line.Split(' '))).ShouldBe(["qwen2.5:3b", "gemma3:4b"]);
+    }
+
+    [Fact]
+    public void Sem_modelos_usa_o_padrao_do_app()
+    {
+        AiEvalCommand.Models(Args.Parse(["eval"])).ShouldBe(["qwen2.5:3b"]);
+    }
+
     [Fact]
     public async Task Narrador_comenta_a_revisao_da_referencia_degradada()
     {

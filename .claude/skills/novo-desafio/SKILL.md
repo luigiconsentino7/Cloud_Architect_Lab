@@ -5,7 +5,7 @@ description: Cria ou corrige uma semente de desafio de System Design do mercado 
 
 # Novo desafio (semente)
 
-> Comandos do CLI: `./lab.sh <args>` (Linux, macOS, Git Bash) ou `lab <args>` no Windows (`lab.cmd`), na raiz do repositório.
+> Comandos do CLI, na raiz do repositório: `./lab.sh <args>` (Linux, macOS, Git Bash), `.\lab.cmd <args>` (PowerShell) ou `lab <args>` (Prompt de Comando).
 
 Uma semente é o desafio curado de onde o app instancia variações: enunciado, casos de uso, workload, plano de testes,
 restrições, dicas, esclarecimentos e a **solução de referência**, que o validador simula e que precisa tirar 85 ou mais

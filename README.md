@@ -82,11 +82,14 @@ Configuração (`src/Lab.App/appsettings.json` ou variáveis de ambiente):
 Os prompts são versionados em `content/prompts/<papel>/v<n>.md` e a versão usada fica gravada junto com o desafio ou a
 narrativa.
 
-**Qual modelo usar?** Compare os modelos na sua máquina com os datasets de `content/evals` (o spike S4 da spec):
+**Qual modelo usar?** Compare os modelos na sua máquina com os datasets de `content/evals` (o spike S4 da spec). Com o
+Ollama aberto e os modelos baixados (`ollama pull gemma3:4b`), rode na pasta do repositório. No PowerShell:
 
-```bash
-ollama pull gemma3:4b
+```powershell
+.\lab.cmd ai eval --models "qwen2.5:3b,gemma3:4b"
 ```
+
+No Linux, macOS ou Git Bash:
 
 ```bash
 ./lab.sh ai eval --models qwen2.5:3b,gemma3:4b
@@ -159,7 +162,9 @@ npm run e2e:ai
 
 ### Conteúdo e CLI `lab`
 
-Na raiz do repositório, `./lab.sh` (Linux, macOS, Git Bash) ou `lab` (Windows, `lab.cmd`):
+Na raiz do repositório: `./lab.sh` no Linux, macOS e Git Bash, `.\lab.cmd` no PowerShell e `lab` no Prompt de
+Comando. No PowerShell, ponha listas com vírgula entre aspas (`--models "a,b"`); sem aspas ele separa os itens, o
+que o `lab` também aceita.
 
 ```bash
 ./lab.sh challenge list

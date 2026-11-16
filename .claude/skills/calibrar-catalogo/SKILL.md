@@ -5,7 +5,7 @@ description: Calibra os valores do catálogo de serviços de nuvem (limites, lat
 
 # Calibrar o catálogo
 
-> Comandos do CLI: `./lab.sh <args>` (Linux, macOS, Git Bash) ou `lab <args>` no Windows (`lab.cmd`), na raiz do repositório.
+> Comandos do CLI, na raiz do repositório: `./lab.sh <args>` (Linux, macOS, Git Bash), `.\lab.cmd <args>` (PowerShell) ou `lab <args>` (Prompt de Comando).
 
 O simulador só é tão bom quanto o catálogo. Cada serviço (`content/catalog/aws.yaml`, `azure.yaml`, `gcp.yaml`)
 sobrescreve os padrões do seu arquétipo (`content/catalog/archetypes.yaml`): desempenho (latência p50/p99, vazão

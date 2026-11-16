@@ -5,7 +5,7 @@ description: Escreve uma revisão aprofundada, em markdown, de uma avaliação d
 
 # Revisar uma avaliação
 
-> Comandos do CLI: `./lab.sh <args>` (Linux, macOS, Git Bash) ou `lab <args>` no Windows (`lab.cmd`), na raiz do repositório.
+> Comandos do CLI, na raiz do repositório: `./lab.sh <args>` (Linux, macOS, Git Bash), `.\lab.cmd <args>` (PowerShell) ou `lab <args>` (Prompt de Comando).
 
 O app dá a nota e a revisão determinística; esta skill é a conversa de mentor que vem depois. **A nota não muda**:
 ela é do motor, e a revisão aprofundada explica, aprofunda e propõe próximos passos.

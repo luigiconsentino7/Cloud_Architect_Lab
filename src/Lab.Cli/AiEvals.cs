@@ -390,12 +390,24 @@ public static class AiEvalReport
 
 public static class AiEvalCommand
 {
+    public const string DefaultModel = "qwen2.5:3b";
+
+    /// <summary>
+    /// Modelos a avaliar: <c>--models a,b</c>, <c>--models a --models b</c> ou nomes soltos depois de <c>ai eval</c>
+    /// (o PowerShell transforma <c>a,b</c> sem aspas em dois argumentos).
+    /// </summary>
+    public static IReadOnlyList<string> Models(Args args)
+    {
+        var models = args.Options("models").Concat(args.Positionals.Skip(1)).Distinct(StringComparer.Ordinal).ToList();
+        return models.Count > 0 ? models : [DefaultModel];
+    }
+
     public static async Task<int> RunAsync(string contentRoot, Args args, TextWriter output)
     {
         var content = ContentRepository.Load(contentRoot);
         var prompts = PromptLibrary.Load(Path.Combine(content.Root, "prompts"));
         var endpoint = args.Option("endpoint") ?? "http://localhost:11434";
-        var models = (args.Option("models") ?? "qwen2.5:3b").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var models = Models(args);
         var roles = (args.Option("roles") ?? string.Join(',', AiEvalRunner.AllRoles)).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var unknown = roles.Where(r => !AiEvalRunner.AllRoles.Contains(r)).ToList();
         if (unknown.Count > 0) throw new UsageException($"Papéis desconhecidos: {string.Join(", ", unknown)} (use {string.Join(", ", AiEvalRunner.AllRoles)}).");
