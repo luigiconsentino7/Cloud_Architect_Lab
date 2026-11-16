@@ -1,9 +1,13 @@
+using Lab.Ir;
 using Lab.Rules.Rules;
 
 namespace Lab.Rules;
 
 public static class RuleEngine
 {
+    /// <summary>Versão do conjunto de regras (entra no manifesto da avaliação).</summary>
+    public const string Version = "0.1.0";
+
     public static IReadOnlyList<IArchitectureRule> All { get; } =
     [
         new SinglePointOfFailureRule(),
@@ -38,9 +42,9 @@ public static class RuleEngine
     public static IArchitectureRule? Find(string id) => All.FirstOrDefault(r => r.Id == id);
 
     /// <summary>Executa as regras aplicáveis ao desafio, em ordem estável de ID.</summary>
-    public static IReadOnlyList<Finding> Run(RuleContext context) =>
+    public static IReadOnlyList<Finding> Run(RuleContext context) => EngineCulture.Run<IReadOnlyList<Finding>>(() =>
         All.Where(r => r.AppliesTo(context.Challenge))
             .OrderBy(r => r.Id, StringComparer.Ordinal)
             .SelectMany(r => r.Evaluate(context))
-            .ToList();
+            .ToList());
 }

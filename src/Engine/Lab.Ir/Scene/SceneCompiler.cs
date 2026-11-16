@@ -25,7 +25,9 @@ public sealed record CompilationResult(ArchitectureGraph Graph, IReadOnlyList<Di
 /// <summary>Compila a cena do Excalidraw (desenho + customData) na IR que o motor testa. Determinístico.</summary>
 public static class SceneCompiler
 {
-    public static CompilationResult Compile(SceneCompileRequest request)
+    public static CompilationResult Compile(SceneCompileRequest request) => EngineCulture.Run(() => CompileCore(request));
+
+    private static CompilationResult CompileCore(SceneCompileRequest request)
     {
         var context = new Context(request);
         context.CollectComponents();

@@ -38,9 +38,12 @@ public sealed record UseCaseFunctionalResult
 public static class FunctionalVerifier
 {
     public static IReadOnlyList<UseCaseFunctionalResult> Verify(RuleContext context) =>
-        context.Challenge.UseCases.Select(u => Verify(context, u)).ToList();
+        EngineCulture.Run<IReadOnlyList<UseCaseFunctionalResult>>(() => context.Challenge.UseCases.Select(u => VerifyCore(context, u)).ToList());
 
-    public static UseCaseFunctionalResult Verify(RuleContext context, UseCaseSpec useCase)
+    public static UseCaseFunctionalResult Verify(RuleContext context, UseCaseSpec useCase) =>
+        EngineCulture.Run(() => VerifyCore(context, useCase));
+
+    private static UseCaseFunctionalResult VerifyCore(RuleContext context, UseCaseSpec useCase)
     {
         var plan = context.PlanFor(useCase)!;
         var problems = plan.Problems.ToList();

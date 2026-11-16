@@ -45,6 +45,11 @@ public sealed record NodeResult
     public long DlqMessages { get; init; }
     public double MeanServiceMs { get; init; }
     public double PeakArrivalRps { get; init; }
+
+    /// <summary>Segundos sem aceitar operações (banco relacional durante failover ou queda da zona do primário).</summary>
+    public double UnavailableSeconds { get; init; }
+
+    public int Failovers { get; init; }
 }
 
 public sealed record IntegrityResult(

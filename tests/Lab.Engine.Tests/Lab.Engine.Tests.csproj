@@ -9,6 +9,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="Shouldly" />
+    <Using Include="Lab.Ir.Scene.SceneWriter" Alias="SceneBuilder" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CsCheck" />

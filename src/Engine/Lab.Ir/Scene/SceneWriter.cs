@@ -1,15 +1,20 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Lab.Ir;
 
-namespace Lab.Engine.Tests.Support;
+namespace Lab.Ir.Scene;
 
-/// <summary>Monta cenas no formato do Excalidraw, com o mesmo customData que o frontend grava.</summary>
-public sealed class SceneBuilder
+/// <summary>
+/// Monta cenas no formato do Excalidraw, com o mesmo customData que o frontend grava. Usado para converter a
+/// solução de referência das sementes em cena (e daí em IR, pelo mesmo compilador do desenho do usuário) e nos testes.
+/// </summary>
+public sealed class SceneWriter
 {
     private readonly List<JsonObject> _elements = [];
     private readonly Dictionary<string, string> _anchorOf = new(StringComparer.Ordinal);
     private int _sequence;
+
+    /// <summary>Versão do catálogo gravada em cada componente (só informativa para o compilador).</summary>
+    public string CatalogVersion { get; init; } = "2026.11.0";
 
     public string Component(string catalogId, string label, double x = 0, double y = 0, object? config = null,
         string? id = null, string? externalId = null, string? frameId = null)
@@ -23,7 +28,7 @@ public sealed class SceneBuilder
             ["componentId"] = componentId,
             ["catalogId"] = catalogId,
             ["role"] = "anchor",
-            ["catalogVersion"] = "2026.11.0",
+            ["catalogVersion"] = CatalogVersion,
         };
         if (config is not null) data["config"] = config as JsonNode ?? JsonSerializer.SerializeToNode(config, LabJson.Options);
         if (externalId is not null) data["externalId"] = externalId;
@@ -44,8 +49,8 @@ public sealed class SceneBuilder
         if (config is not null) data["config"] = config as JsonNode ?? JsonSerializer.SerializeToNode(config, LabJson.Options);
 
         var arrow = Element($"arrow_{connectionId}", "arrow", 0, 0, 100, 0, null, null, customData: data);
-        arrow["startBinding"] = new JsonObject { ["elementId"] = reversedHeads ? _anchorOf[to] : _anchorOf[from] };
-        arrow["endBinding"] = new JsonObject { ["elementId"] = reversedHeads ? _anchorOf[from] : _anchorOf[to] };
+        arrow["startBinding"] = new JsonObject { ["elementId"] = Anchor(reversedHeads ? to : from) };
+        arrow["endBinding"] = new JsonObject { ["elementId"] = Anchor(reversedHeads ? from : to) };
         arrow["strokeStyle"] = dashed ? "dashed" : "solid";
         arrow["startArrowhead"] = reversedHeads ? "arrow" : null;
         arrow["endArrowhead"] = reversedHeads ? null : "arrow";
@@ -57,7 +62,7 @@ public sealed class SceneBuilder
     {
         var id = $"loose_{++_sequence:00}";
         var arrow = Element(id, "arrow", 0, 0, 100, 0, null, null);
-        arrow["startBinding"] = new JsonObject { ["elementId"] = _anchorOf[from] };
+        arrow["startBinding"] = new JsonObject { ["elementId"] = Anchor(from) };
         arrow["endArrowhead"] = "arrow";
         _elements.Add(arrow);
         return id;
@@ -87,6 +92,8 @@ public sealed class SceneBuilder
         return id;
     }
 
+    public bool Contains(string nodeId) => _anchorOf.ContainsKey(nodeId);
+
     public JsonObject Build(bool reverse = false)
     {
         var elements = new JsonArray();
@@ -94,6 +101,9 @@ public sealed class SceneBuilder
             elements.Add(element.DeepClone());
         return new JsonObject { ["type"] = "excalidraw", ["version"] = 2, ["elements"] = elements };
     }
+
+    private string Anchor(string nodeId) =>
+        _anchorOf.TryGetValue(nodeId, out var anchor) ? anchor : throw new ArgumentException($"Componente '{nodeId}' não existe na cena.", nameof(nodeId));
 
     private static JsonObject Element(string id, string type, double x, double y, double width, double height,
         string? groupId, string? frameId, JsonObject? customData = null, string? containerId = null, string? text = null)

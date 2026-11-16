@@ -305,10 +305,11 @@ As séries temporais (vazão, erros, latência, utilização e filas, em janelas
 
 ## Etapa 5 — Custo
 
-- **Mensal na carga baseline:** recursos provisionados × 730 h + uso (requisições, GB armazenados, GB transferidos) + média de instâncias extras durante os picos do `dailyPattern` (ex.: 2 h/dia em pico no dia de pagamento).
-- **Transferência de dados** entre AZs, entre regiões e para a internet entra explicitamente: é um custo que quase todo mundo esquece.
+- **Mensal na carga baseline:** recursos provisionados × 730 h + uso (requisições, GB armazenados, GB transferidos) + média de instâncias extras durante os picos do `dailyPattern` (ex.: 2 h/dia em pico no dia de pagamento). O volume do mês é `baseline × (horas normais + horas de pico × multiplicador) × 30 dias`; as instâncias médias de contêineres vêm da simulação do baseline e do pico público.
+- **Lotes contam:** uma função que consome uma fila em lotes de 10 é cobrada por invocação de lote; leitura e remoção na fila também.
+- **Transferência de dados** para a internet entra explicitamente: é um custo que quase todo mundo esquece. Entre AZs e entre regiões entra na F2 (o resultado avisa que ainda não está na conta).
 - **Preços** da região do desafio (São Paulo costuma custar mais que Virgínia do Norte — bom de aprender), em tabelas versionadas e ilustrativas, com fonte e data.
-- **Saída:** breakdown por componente e por categoria, comparação com o orçamento e com o custo da solução de referência.
+- **Saída:** breakdown por componente e por categoria, com a base de cálculo de cada linha ("15 instâncias em média × 2 vCPU × 730 h"), comparação com o orçamento e com o custo da solução de referência — que é simulada nos mesmos cenários de baseline e pico e guardada em cache por desafio.
 
 ## Etapa 6 — Revisão
 
@@ -357,9 +358,19 @@ Verificação de integridade (duplicidade, perda, ordenação):
   UC monetário        → 1 se violações = 0, senão 0
   demais UCs          → max(0, 1 − violações / (0,001 × requisições))
 
-nota_dimensão = 100 × média ponderada das verificações − penalidades de regras não confirmadas
-  penalidades: crítica 25 · alta 10 · média 4 · baixa 1 (mínimo 0)
-  regra confirmada por cenário (ex.: DAT-001 + lostEvents > 0) não é penalizada duas vezes
+nota_cenário  = menor pontuação entre as verificações do cenário naquela dimensão
+                # um cenário só passa se todos os SLOs dele passarem: o pico com 84,7% de sucesso vale 0,
+                # mesmo com o p99 dentro do limite
+nota_dimensão = 100 × média ponderada dos cenários − penalidades de regras não confirmadas
+  peso do cenário: 2 se envolve um UC crítico, 1 nos demais
+  penalidades: crítica 25 · alta 10 · média 4 · baixa 1, somadas por achado e limitadas a 2× a
+               severidade mais alta da regra (nota mínimo 0)
+  regra confirmada = o efeito que ela prevê apareceu num cenário E derrubou uma verificação desse
+                     cenário (ex.: DAT-002 + efeitos duplicados > 0 no cenário de duplicidade).
+                     Ela não é penalizada de novo: a verificação reprovada já cobrou.
+
+Folga de capacidade (Performance): utilização média do componente mais ocupado no baseline
+  ≤ 75% → 1 ; senão max(0, 1 − (utilização − 0,75) / 0,25)        # entra como verificação de peso 1
 
 Custo:
   custo ≤ orçamento   → 100 − 40 × max(0, custo / custo_referência − 1,5)
@@ -372,6 +383,8 @@ teto       = 50 se algum UC não tem caminho válido
 nota_final = round(min(nota_base, teto))
 rank       = S ≥ 90 · A ≥ 80 · B ≥ 70 · C ≥ 60 · D < 60
 ```
+
+A revisão ordena os pontos de melhoria pelo **impacto na nota final**: a perda de cada cenário é dividida entre as regras confirmadas que o explicam (ou vira um item do próprio cenário, com o gargalo da simulação como evidência); quando a dimensão bate no zero, as perdas são reescaladas para somar a perda real; o que a trava tirou vai para os itens que a causaram.
 
 As travas reproduzem um design review real: um desenho que perde ou duplica dinheiro não passa, por mais rápido que seja. A tela de resultado mostra a contribuição de cada verificação e regra — toda pontuação é explicável.
 
@@ -394,14 +407,14 @@ As travas reproduzem um design review real: um desenho que perde ou duplica dinh
 }
 ```
 
-Reavaliar o mesmo manifesto devolve o resultado em cache; recalcular do zero produz o mesmo resultado byte a byte (verificado nos testes de propriedade).
+Reavaliar o mesmo manifesto devolve o resultado em cache; recalcular do zero produz o mesmo resultado byte a byte (verificado nos testes de propriedade). Para isso o motor sempre formata números e mensagens em pt-BR, independente da cultura da máquina, e o hash do resultado ignora só os tempos de relógio.
 
 ## Como sabemos que o motor está certo
 
 1. **Testes "golden" contra a teoria:** M/M/1 com ρ = 0,5, 0,8 e 0,95 (espera média a ±3% do analítico); M/M/c contra Erlang C; M/D/1.
 2. **Lei de Little (L = λW)** verificada em cada nó em toda execução de teste.
 3. **Propriedades (CsCheck):** determinismo (mesma semente → mesmo hash do resultado), conservação (entradas = concluídas + falhas + em voo), monotonicidade estatística (mais capacidade não piora o p99 em regime estacionário, com tolerância), ausência de tempos negativos.
-4. **Histórias conhecidas como testes:** retry storm, thundering herd depois de um flush do cache, partição quente, abismo de concorrência de funções serverless, lag de consumidor com menos partições que consumidores — cada uma com o resultado qualitativo esperado.
+4. **Histórias conhecidas como testes:** retry storm, thundering herd depois de um flush do cache, partição quente, abismo de concorrência de funções serverless, lag de consumidor com menos partições que consumidores, janela sem escrita no failover de um banco de primário único durante a queda de AZ — cada uma com o resultado qualitativo esperado.
 5. **Calibração:** valores do catálogo com fonte e data; revisão periódica com a skill `calibrar-catalogo` do Claude Code.
 6. **Sensibilidade (F2):** o resultado mostra quais premissas mais mexem na nota ("sua nota de Performance depende muito da latência assumida do SPI").
 
@@ -419,7 +432,7 @@ Reavaliar o mesmo manifesto devolve o resultado em cache; recalcular do zero pro
 
 - UC-1 Enviar PIX (monetário): autenticar → checar idempotência → debitar saldo de forma atômica → chamar o SPI → publicar evento. SLOs: p99 ≤ 1.000 ms; sucesso ≥ 99,95%.
 - UC-2 Consultar status: p99 ≤ 200 ms. UC-3 Notificar o recebedor (assíncrono): p95 ≤ 5 s, sem perda.
-- Carga: baseline 1.500 TPS; pico 5x no dia de pagamento; spike 15x por 30 s. SPI: p50 120 ms, p99 400 ms. Orçamento US$ 12.000/mês; dados no Brasil.
+- Carga: baseline 1.500 TPS; pico 5x no dia de pagamento; spike 15x por 30 s. SPI: p50 120 ms, p99 400 ms. Orçamento US$ 59.000/mês; dados no Brasil.
 - Públicos: baseline e pico. Ocultos: spike, queda de AZ, SPI lento, duplicidade.
 
 **Tentativa 1:** Cliente → API Gateway → Lambda `pix-sender` → DynamoDB (escrita condicional com a chave de idempotência) → SPI (timeout 2 s, 2 retries, sem circuit breaker) → SNS (publicação direta) → Lambda `notificador` (sem idempotência) → provedor de push.
@@ -433,7 +446,7 @@ Reavaliar o mesmo manifesto devolve o resultado em cache; recalcular do zero pro
 | Queda de AZ (oculto) | ✓ serviços regionais multi-AZ |
 | SPI lento (oculto) | ✗ timeouts + retries multiplicam a carga; sucesso cai para 62% durante o evento |
 | Duplicidade (oculto) | Débitos duplicados: 0 ✓ · notificações duplicadas: 37 ✗ · eventos perdidos: 14 ✗ (F2, com `publish-crash`) |
-| Custo | US$ 7.900/mês ✓ |
+| Custo | US$ 52.800/mês ✓ (orçamento de US$ 59.000) |
 
 Notas: Funcional 100 · Performance 38 · Resiliência 45 · Consistência 72 · Segurança 80 · Custo 90 · Operação 60 → **69 (C)**. Sem trava: as violações de integridade estão no UC-3, que não é monetário.
 

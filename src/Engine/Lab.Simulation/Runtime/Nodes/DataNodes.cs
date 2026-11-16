@@ -26,6 +26,8 @@ internal sealed class RelationalNode : SimNode
     private string _primaryZone;
     private string? _standbyZone;
     private bool _down;
+    private long _downSinceUs;
+    private long _unavailableUs;
     private int _open;
     private int _roundRobin;
 
@@ -64,6 +66,19 @@ internal sealed class RelationalNode : SimNode
     }
 
     public int Servers => _primary.Capacity;
+
+    public int Failovers { get; private set; }
+
+    /// <summary>Tempo sem aceitar operações (primário fora, à espera do failover ou da volta da zona).</summary>
+    public double UnavailableSecondsAt(long nowUs) => (_unavailableUs + (_down ? nowUs - _downSinceUs : 0)) / 1_000_000.0;
+
+    private void Recover(bool failover)
+    {
+        if (!_down) return;
+        _unavailableUs += K.Now - _downSinceUs;
+        if (failover) Failovers++;
+        _down = false;
+    }
 
     public int MaxQueue => _primary.MaxWaitingObserved;
 
@@ -169,20 +184,22 @@ internal sealed class RelationalNode : SimNode
             _downZones.Add(zone);
             if (zone != _primaryZone || _down) return;
             _down = true;
+            _downSinceUs = K.Now;
             if (Requests > 0 && !_multiAz) DataLoss = true;
             if (_multiAz && _standbyZone is { } standby && !_downZones.Contains(standby))
             {
                 K.AfterMs(_failoverSeconds * 1000, () =>
                 {
+                    if (!_down) return;
                     (_primaryZone, _standbyZone) = (standby, _primaryZone);
-                    _down = false;
+                    Recover(failover: true);
                 });
             }
         }
         else
         {
             _downZones.Remove(zone);
-            if (_down && zone == _primaryZone) K.AfterMs(_failoverSeconds * 1000, () => _down = false);
+            if (_down && zone == _primaryZone) K.AfterMs(_failoverSeconds * 1000, () => Recover(failover: false));
         }
     }
 

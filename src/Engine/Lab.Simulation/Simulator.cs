@@ -30,7 +30,10 @@ public static class Simulator
 {
     public const string EngineVersion = "0.1.0";
 
-    public static SimulationReport Run(SimulationRequest request, CancellationToken cancellationToken = default)
+    public static SimulationReport Run(SimulationRequest request, CancellationToken cancellationToken = default) =>
+        EngineCulture.Run(() => RunCore(request, cancellationToken));
+
+    private static SimulationReport RunCore(SimulationRequest request, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
         var plans = FlowPlanner.PlanAll(request.Graph, request.Challenge);
@@ -189,6 +192,8 @@ public static class Simulator
             DlqMessages = node.DlqMessages,
             MeanServiceMs = Round(meanServiceMs, 3),
             PeakArrivalRps = node.Arrivals.Skip(from).Take(Math.Max(1, to - from)).DefaultIfEmpty(0).Max(),
+            UnavailableSeconds = node is RelationalNode db ? Round(db.UnavailableSecondsAt(world.Kernel.Now), 1) : 0,
+            Failovers = node is RelationalNode r2 ? r2.Failovers : 0,
         };
     }
 
@@ -212,6 +217,13 @@ public static class Simulator
                     found.Add((node.Rejected + (node.UtilizationMax * 1000), new Bottleneck(node.NodeId, "cpu",
                         $"\"{node.Label}\" chegou a {node.UtilizationMax:P0} de CPU com {node.InstancesMax} instância(s); {node.Rejected:N0} requisições rejeitadas por fila cheia.",
                         node.InstancesMax, null)));
+                    break;
+                case Archetypes.Relational when node.UnavailableSeconds > 0:
+                    found.Add((node.Errors + (node.UnavailableSeconds * 1000), new Bottleneck(node.NodeId, "failover",
+                        node.Failovers > 0
+                            ? $"\"{node.Label}\" ficou ~{node.UnavailableSeconds:N0} s sem aceitar operações enquanto o primário fazia failover para outra zona; {node.Errors:N0} operações falharam nesse intervalo."
+                            : $"\"{node.Label}\" ficou ~{node.UnavailableSeconds:N0} s fora com a zona do primário (sem standby em outra zona); {node.Errors:N0} operações falharam.",
+                        node.UnavailableSeconds, null)));
                     break;
                 case Archetypes.Relational or Archetypes.RelationalDistributed when node.ConnectionErrors > 0:
                     found.Add((node.ConnectionErrors, new Bottleneck(node.NodeId, "connections",

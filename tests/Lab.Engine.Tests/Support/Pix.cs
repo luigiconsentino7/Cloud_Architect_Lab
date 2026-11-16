@@ -85,7 +85,7 @@ public static class Pix
                 new SloSpec { Id = "SLO-5", UseCase = "UC-2", Metric = "latency.p99", Max = 200, Scenarios = ["baseline"] },
             ],
         },
-        Constraints = new ConstraintsSpec { BudgetUsdMonth = 12000, DataResidencyBrazil = true, Compliance = ["lgpd", "bacen-4893"], RequireEncryptionAtRest = true },
+        Constraints = new ConstraintsSpec { BudgetUsdMonth = 50000, DataResidencyBrazil = true, Compliance = ["lgpd", "bacen-4893"], RequireEncryptionAtRest = true },
     };
 
     /// <summary>Desenho sólido: ECS multi-AZ, Aurora multi-AZ com transação, SPI com timeout curto + circuit breaker + fila de pendências, outbox e consumidor idempotente.</summary>
@@ -165,6 +165,13 @@ public static class Pix
             new FlowDefinition("UC-2", ["b01", "b02", "b08"]),
         ]);
     }
+
+    /// <summary>O desafio com o desenho sólido como solução de referência (para custo e comparação).</summary>
+    public static ChallengeSpec WithReference(ChallengeSpec challenge) => challenge with
+    {
+        Reference = Compile(Good(), challenge).Graph,
+        ReferenceRationale = "Contêineres multi-AZ no caminho síncrono, transação no ledger, SPI protegido por timeout curto, circuit breaker e fila de pendências, e eventos via outbox com consumidor idempotente.",
+    };
 
     public static CompilationResult Compile(Design design, ChallengeSpec challenge, ComponentCatalog? catalog = null) =>
         SceneCompiler.Compile(new SceneCompileRequest
