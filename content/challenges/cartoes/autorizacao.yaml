@@ -1,0 +1,142 @@
+id: cartoes/autorizacao
+version: 1
+title: Autorizador de cartão com contingência
+summary: Autorize compras em menos de 300 ms, controle o limite sem corrida e não pare quando o antifraude falhar.
+track: cartoes
+domain: cartões
+tags: [cartoes, autorizacao, limite, antifraude, stand-in, latencia]
+difficulties: [senior, staff]
+
+variables:
+  baselineRps:
+    description: Autorizações por segundo num dia normal
+    default: 1200
+    step: 100
+    ranges: { senior: [800, 1500], staff: [1500, 2500] }
+
+twists:
+  - id: antifraude-fora
+    title: Antifraude fora do ar
+    description: O motor de antifraude do parceiro cai por alguns segundos em pleno sábado de shopping.
+    ops:
+      - op: append
+        path: testPlan.scenarios
+        value:
+          id: antifraude-fora
+          name: Antifraude fora do ar
+          kind: chaos
+          visibility: hidden
+          load: { ref: baseline }
+          faults: [ { type: dependency-outage, target: "external:antifraude", at: 10s, for: 15s } ]
+      - { op: append, path: "testPlan.slos[SLO-2].scenarios", value: antifraude-fora }
+
+narrative: |
+  O Banco Aurora emite 4 milhões de cartões de crédito. Cada compra chega da bandeira como um pedido de autorização que
+  precisa de resposta em menos de 300 ms; passou disso, a bandeira decide sozinha (stand-in) e o banco perde o controle
+  do risco. São {{ baselineRps | n0 }} autorizações por segundo, e três vezes mais na Black Friday.
+
+  A autorização confere o limite disponível (duas compras simultâneas não podem usar o mesmo limite) e consulta um
+  antifraude de parceiro. Se o antifraude falhar, o banco precisa decidir com regras próprias, sem recusar tudo.
+
+useCases:
+  - id: UC-1
+    name: Autorizar compra
+    description: Limite atômico, antifraude e resposta à bandeira.
+    entryClient: client.partner
+    monetary: true
+    requiredCapabilities:
+      - { capability: authenticate, description: "Só a bandeira (mTLS) pede autorização." }
+      - { capability: idempotency-check, description: "Retransmissões da bandeira não reservam o limite de novo." }
+      - { capability: atomic-balance-update, before: respond, description: "O limite é reservado de forma atômica antes da resposta." }
+      - { capability: external-call, target: "external:antifraude", description: "Toda compra passa pelo antifraude." }
+      - { capability: publish-event, description: "A autorização vira evento para fatura e notificação." }
+    negativePaths:
+      - { dependency: "external:antifraude", expect: fallback, description: "Sem antifraude, regras próprias decidem a compra." }
+
+externalSystems:
+  - { id: "external:antifraude", name: Antifraude do parceiro, latency: { p50: 40ms, p99: 160ms }, availability: 0.999, idempotent: true }
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 1, payloadKb: 2, computeCostMs: { p50: 3, p99: 10 } }
+  keys: 4000000
+  dailyPattern: { peakHoursPerDay: 4, peakMultiplier: 2 }
+  storedGb: 400
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Dia normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 30s, warmup: 10s } }
+    - id: black-friday
+      name: Black Friday (3x)
+      kind: load
+      visibility: public
+      load: { profile: ramp, fromRps: "{{ baselineRps }}", toRps: "{{ baselineRps * 3 }}", rampFor: 10s, holdFor: 30s, warmup: 10s }
+    - id: antifraude-lento
+      name: Antifraude lento
+      kind: chaos
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: latency-injection, target: "external:antifraude", addMs: { p50: 250, p99: 900 }, at: 10s, for: 20s } ]
+    - id: retransmissoes
+      name: Retransmissões da bandeira
+      kind: integrity
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: client-retry, onTimeoutMs: 300, sameIdempotencyKey: true } ]
+  slos:
+    - { id: SLO-1, useCase: UC-1, metric: latency.p99, max: 300ms, scenarios: [baseline, black-friday, antifraude-lento], description: "resposta à bandeira em até 300 ms (p99)" }
+    - { id: SLO-2, useCase: UC-1, metric: success-rate, min: 99.95%, scenarios: [baseline, black-friday, antifraude-lento], description: "sucesso de 99,95%" }
+    - { id: SLO-3, metric: duplicate-effects, max: 0, scenarios: [retransmissoes], description: "nenhuma reserva de limite duplicada" }
+
+constraints:
+  budgetUsdMonth: "{{ round(4000 + baselineRps * 30) }}"
+  dataResidencyBrazil: true
+  compliance: [pci-dss, bacen-4893]
+  requireEncryptionAtRest: true
+
+competencies: [baixa-latencia, resiliencia, consistencia]
+
+hints:
+  - { level: 1, text: "300 ms é o orçamento inteiro, contando o antifraude. Quanto sobra para o resto, e quanto você espera por ele?" }
+  - { level: 2, text: "Duas compras ao mesmo tempo no mesmo cartão: o que impede as duas de usarem o mesmo limite?" }
+  - { level: 3, text: "Timeout curto e circuit breaker no antifraude, com regras locais como fallback; limite com escrita condicional." }
+
+clarifications:
+  - question: O que a bandeira faz se o banco demorar?
+    keywords: [stand-in, demora, timeout, bandeira]
+    answer: Ela decide sozinha (stand-in) com regras simples. Neste desafio, conte como falha do banco.
+  - question: As regras locais podem aprovar sem antifraude?
+    keywords: [regras, fallback, contingência]
+    answer: Sim, para compras de menor risco. Neste desafio, a decisão por regras locais conta como resposta válida.
+
+reference:
+  rationale: >-
+    O autorizador roda em contêineres multi-AZ dimensionados para a Black Friday. O limite é reservado com escrita
+    condicional num banco chave-valor regional (a mesma escrita guarda o id da autorização, então a retransmissão não
+    reserva de novo). O antifraude tem timeout de 150 ms e circuit breaker; quando falha, regras locais (cache) decidem.
+    A autorização sai para a fatura por outbox.
+  nodes:
+    - { id: brand, component: client.partner, label: Bandeira }
+    - { id: gw, archetype: edge.api-gateway, label: API de autorização, config: { auth: mtls, throttle: { rps: "{{ baselineRps * 6 }}", burst: "{{ baselineRps * 3 }}" } } }
+    - id: auth
+      archetype: compute.service
+      label: autorizador
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 110)) }}", max: "{{ max(6, ceil(baselineRps / 40)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - { id: limits, archetype: data.key-value, label: limites, config: { partitionKey: cartaoId } }
+    - { id: fraud, external: "external:antifraude", label: Antifraude }
+    - { id: rules, archetype: data.cache, label: regras-locais, config: { nodes: 2, replicas: 1, multiAz: true, zones: [a, b] } }
+    - { id: events, archetype: messaging.queue, label: autorizacoes, config: { dlq: { enabled: true, maxReceiveCount: 5 }, observability: { alarms: true } } }
+  edges:
+    - { id: e01, from: brand, to: gw, config: { idempotencyKey: true } }
+    - { id: e02, from: gw, to: auth, config: { timeoutMs: 290 } }
+    - { id: e03, from: auth, to: limits, config: { ops: [ { op: conditional-write, count: 1 } ] } }
+    - { id: e04, from: auth, to: fraud, config: { timeoutMs: 150, circuitBreaker: { enabled: true, errorRateThreshold: 0.3, openMs: 10000 } } }
+    - { id: e05, from: auth, to: rules, config: { trigger: on-failure, triggerOf: e04, ops: [ { op: read, count: 1 } ] } }
+    - { id: e06, from: auth, to: events, config: { delivery: outbox } }
+  flows:
+    UC-1: [e01, e02, e03, e04, e05, e06]

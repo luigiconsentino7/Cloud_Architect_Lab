@@ -1,0 +1,141 @@
+id: capitais/cotacoes
+version: 1
+title: Distribuição de cotações em tempo real
+summary: Receba o feed da bolsa e entregue a última cotação de cada ativo em milissegundos, sempre na ordem certa.
+track: capitais
+domain: mercado de capitais
+tags: [market-data, stream, ordenacao, cache, baixa-latencia]
+difficulties: [pleno, senior, staff]
+
+variables:
+  baselineRps:
+    description: Requisições por segundo (atualizações do feed + consultas de cotação)
+    default: 3000
+    step: 250
+    ranges: { pleno: [1000, 2500], senior: [2500, 5000], staff: [5000, 8000] }
+
+narrative: |
+  A Corretora Prisma mostra cotações em tempo real para 600 mil investidores. O feed da bolsa entrega atualizações de
+  preço que precisam chegar à tela em menos de meio segundo, e o app consulta a última cotação de cada ativo o tempo
+  todo — {{ baselineRps * 0.8 | n0 }} consultas por segundo num dia normal.
+
+  Na abertura do pregão, o volume de mensagens multiplica por dez durante alguns segundos. Uma cotação fora de ordem
+  (um preço antigo depois de um novo) é um erro grave: o investidor decide em cima dela.
+
+useCases:
+  - id: UC-1
+    name: Ingerir atualização de preço
+    description: Atualização do feed → última cotação do ativo, na ordem do feed.
+    entryClient: client.partner
+    critical: true
+    requiresOrdering: true
+    requiredCapabilities:
+      - { capability: publish-event, description: "As atualizações passam por um log ordenado por ativo." }
+  - id: UC-2
+    name: Consultar cotação
+    description: Última cotação de um ativo.
+    entryClient: client.web
+    requiredCapabilities:
+      - { capability: read-from-cache, description: "A última cotação sai da memória." }
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 0.2, payloadKb: 0.5, computeCostMs: { p50: 0.5, p99: 2 } }
+    UC-2: { share: 0.8, payloadKb: 0.5, computeCostMs: { p50: 0.5, p99: 2 } }
+  cacheability: { UC-2: 0.98 }
+  keys: 1500
+  dailyPattern: { peakHoursPerDay: 7, peakMultiplier: 1.5 }
+  storedGb: 50
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Pregão normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 30s, warmup: 10s } }
+    - id: abertura
+      name: Abertura do pregão (10x)
+      kind: load
+      visibility: hidden
+      load: { profile: spike, baseRps: "{{ baselineRps }}", peakRps: "{{ baselineRps * 10 }}", at: 12s, for: 10s, duration: 35s, warmup: 10s }
+    - id: fora-de-ordem
+      name: Reentregas e reordenação
+      kind: integrity
+      visibility: hidden
+      load: { ref: baseline }
+      faults:
+        - { type: reorder, probability: 0.05 }
+        - { type: duplicate-delivery, probability: 0.02 }
+  slos:
+    - { id: SLO-1, useCase: UC-2, metric: latency.p99, max: 150ms, scenarios: [baseline, abertura], description: "cotação em até 150 ms (p99), contando a internet do investidor" }
+    - { id: SLO-2, useCase: UC-2, metric: success-rate, min: 99.9%, scenarios: [baseline, abertura], description: "sucesso de 99,9%" }
+    - { id: SLO-3, useCase: UC-1, metric: async-completion.p95, max: 500ms, scenarios: [baseline], description: "preço novo na tela em até 500 ms (p95)" }
+    - { id: SLO-4, useCase: UC-1, metric: ordering-violations, max: 0, scenarios: [fora-de-ordem], description: "nenhuma cotação fora de ordem" }
+
+constraints:
+  budgetUsdMonth: "{{ round(3000 + baselineRps * 6) }}"
+  compliance: []
+
+competencies: [baixa-latencia, mensageria, escalabilidade]
+
+weights: { functional: 15, performance: 30, resilience: 10, consistency: 25, security: 5, cost: 10, operability: 5 }
+
+hints:
+  - { level: 1, text: "A internet do investidor já consome boa parte dos 150 ms. Sobra pouco para ir ao banco em toda consulta: onde fica a última cotação?" }
+  - { level: 2, text: "Fila comum não garante ordem. Que estrutura mantém a ordem por ativo e aguenta o pico da abertura?" }
+  - { level: 3, text: "Stream particionado pelo ticker e um consumidor que descarta sequência antiga e grava a última cotação no cache; consultas leem só do cache." }
+
+clarifications:
+  - question: Quantos ativos existem?
+    keywords: [ativos, tickers, papéis, quantidade]
+    answer: Cerca de 1.500 ativos negociados, com forte concentração nos 50 mais líquidos.
+  - question: Preciso guardar o histórico?
+    keywords: [histórico, gravar, banco]
+    answer: Não neste desafio. Só a última cotação de cada ativo.
+
+reference:
+  rationale: >-
+    O feed entra por um balanceador e um serviço de ingestão que publica num stream particionado pelo ticker (ordem por
+    ativo e vazão para a abertura). Um consumidor por partição grava a última cotação no cache, deduplicando pela
+    sequência do feed (duas ingestões em paralelo podem gravar fora de ordem no log; a versão antiga é descartada). As consultas passam por um balanceador (menos latência que um gateway) e leem só do cache.
+  nodes:
+    - { id: feed, component: client.partner, label: Feed da bolsa }
+    - { id: web, component: client.web, label: Home broker }
+    - { id: lb, archetype: network.load-balancer, label: Balanceador }
+    - id: ingest
+      archetype: compute.service
+      label: ingestao
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 600)) }}", max: "{{ max(6, ceil(baselineRps / 200)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - { id: stream, archetype: messaging.stream, label: precos, config: { partitions: "{{ max(8, ceil(baselineRps * 2 / 600)) }}", partitionKey: ticker } }
+    - id: consumer
+      archetype: compute.service
+      label: atualizador
+      config:
+        instances: { min: 3, max: 8 }
+        vcpu: 1
+        zones: [a, b, c]
+        idempotency: { enabled: true, storeNodeId: cache, sequenceCheck: true }
+        observability: { metrics: true, logs: true, tracing: true }
+    - { id: cache, archetype: data.cache, label: ultima-cotacao, config: { nodes: 3, replicas: 1, multiAz: true, zones: [a, b, c] } }
+    - id: query
+      archetype: compute.service
+      label: cotacoes-api
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 120)) }}", max: "{{ max(6, ceil(baselineRps / 40)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+  edges:
+    - { id: e01, from: feed, to: lb }
+    - { id: e02, from: lb, to: ingest, config: { timeoutMs: 100 } }
+    - { id: e03, from: ingest, to: stream }
+    - { id: e04, from: stream, to: consumer, config: { batchSize: 20 } }
+    - { id: e05, from: consumer, to: cache, config: { ops: [ { op: write, count: 1 } ] } }
+    - { id: e06, from: web, to: lb }
+    - { id: e07, from: lb, to: query, config: { timeoutMs: 120 } }
+    - { id: e08, from: query, to: cache, config: { ops: [ { op: read, count: 1 } ] } }
+  flows:
+    UC-1: [e01, e02, e03, e04, e05]
+    UC-2: [e06, e07, e08]

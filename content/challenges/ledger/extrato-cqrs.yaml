@@ -1,0 +1,152 @@
+id: ledger/extrato-cqrs
+version: 1
+title: Extrato com CQRS
+summary: Sirva o extrato a milhões de clientes sem sobrecarregar o ledger, mantendo a ordem dos lançamentos.
+track: ledger
+domain: core bancário
+tags: [cqrs, cdc, stream, read-model, ordenacao]
+difficulties: [pleno, senior]
+
+variables:
+  baselineRps:
+    description: Requisições por segundo (consultas de extrato + novos lançamentos)
+    default: 1500
+    step: 100
+    ranges: { pleno: [600, 1500], senior: [1500, 3000] }
+
+narrative: |
+  No Banco Horizonte, o extrato é a tela mais acessada do app: {{ baselineRps * 0.85 | n0 }} consultas por segundo, e
+  muito mais no dia do salário. Hoje o extrato lê direto do ledger, e as consultas estão disputando o banco com os
+  lançamentos.
+
+  Separe leitura e escrita: os lançamentos continuam no ledger e o extrato vem de um modelo de leitura próprio,
+  atualizado a partir dos lançamentos, em poucos segundos e sempre na ordem certa por conta.
+
+useCases:
+  - id: UC-1
+    name: Registrar lançamento
+    description: Um lançamento confirmado no ledger precisa aparecer no extrato.
+    entryClient: client.partner
+    monetary: true
+    requiresOrdering: true
+    requiredCapabilities:
+      - { capability: authenticate }
+      - { capability: idempotency-check, description: "O mesmo lançamento não entra duas vezes." }
+      - { capability: atomic-balance-update, before: respond }
+      - { capability: publish-event, description: "O lançamento chega ao modelo de leitura." }
+  - id: UC-2
+    name: Consultar extrato
+    description: Últimos lançamentos da conta, em ordem.
+    entryClient: client.mobile
+    requiredCapabilities:
+      - { capability: authenticate }
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 0.15, payloadKb: 2, computeCostMs: { p50: 3, p99: 10 } }
+    UC-2: { share: 0.85, payloadKb: 8, computeCostMs: { p50: 2, p99: 6 } }
+  cacheability: { UC-2: 0.5 }
+  dailyPattern: { peakHoursPerDay: 3, peakMultiplier: 2 }
+  storedGb: 800
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Dia normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 30s, warmup: 10s } }
+    - id: dia-do-salario
+      name: Dia do salário (3x)
+      kind: load
+      visibility: public
+      load: { profile: ramp, fromRps: "{{ baselineRps }}", toRps: "{{ baselineRps * 3 }}", rampFor: 10s, holdFor: 30s, warmup: 10s }
+    - id: reordenacao
+      name: Reentregas e reordenação
+      kind: integrity
+      visibility: hidden
+      load: { ref: baseline }
+      faults:
+        - { type: duplicate-delivery, probability: 0.02 }
+        - { type: reorder, probability: 0.05 }
+  slos:
+    - { id: SLO-1, useCase: UC-2, metric: latency.p99, max: 200ms, scenarios: [baseline, dia-do-salario], description: "extrato em até 200 ms (p99)" }
+    - { id: SLO-2, useCase: UC-2, metric: success-rate, min: 99.9%, scenarios: [baseline, dia-do-salario], description: "sucesso do extrato de 99,9%" }
+    - { id: SLO-3, useCase: UC-1, metric: async-completion.p95, max: 5s, scenarios: [baseline, dia-do-salario], description: "lançamento no extrato em até 5 s (p95)" }
+    - { id: SLO-4, useCase: UC-1, metric: ordering-violations, max: 0, scenarios: [reordenacao], description: "extrato sempre em ordem" }
+    - { id: SLO-5, metric: duplicate-effects, max: 0, scenarios: [reordenacao], description: "nenhum lançamento duplicado no extrato" }
+
+constraints:
+  budgetUsdMonth: "{{ round(8000 + baselineRps * 26) }}"
+  dataResidencyBrazil: true
+  compliance: [lgpd]
+  requireEncryptionAtRest: true
+
+competencies: [mensageria, consistencia, escalabilidade]
+
+hints:
+  - { level: 1, text: "O extrato tolera alguns segundos de atraso, mas não pode sair fora de ordem. Que broker garante ordem por conta?" }
+  - { level: 2, text: "Ler e escrever no mesmo banco faz uma carga atrapalhar a outra. Para onde podem ir as leituras?" }
+  - { level: 3, text: "CDC do ledger para um stream particionado por conta; um projetor idempotente grava o modelo de leitura." }
+
+clarifications:
+  - question: O extrato precisa mostrar o lançamento na hora?
+    keywords: [tempo real, atraso, imediato]
+    answer: Até 5 segundos de atraso (p95) é aceitável neste desafio.
+
+reference:
+  rationale: >-
+    O ledger confirma o lançamento numa transação e publica por CDC num stream particionado por conta, o que preserva a
+    ordem. Um projetor idempotente grava o modelo de leitura num banco de documentos; o extrato lê de lá, com cache para
+    as contas mais acessadas, sem tocar no ledger.
+  nodes:
+    - { id: core, component: client.partner, label: Sistemas internos }
+    - { id: app, component: client.mobile, label: App }
+    - { id: waf, archetype: edge.waf, label: WAF }
+    - { id: gw, archetype: edge.api-gateway, label: API, config: { auth: jwt, waf: true, throttle: { rps: "{{ baselineRps * 6 }}", burst: "{{ baselineRps * 3 }}" } } }
+    - id: ledger
+      archetype: compute.service
+      label: ledger-service
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 1200)) }}", max: "{{ max(6, ceil(baselineRps / 400)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - id: db
+      archetype: data.relational-distributed
+      label: ledger-db
+      config: { nodes: 3 }
+      providers:
+        azure: { component: azure.cosmosdb, config: { partitionKey: contaId } }
+    - { id: stream, archetype: messaging.stream, label: lancamentos, config: { partitions: "{{ max(4, ceil(baselineRps / 500)) }}", partitionKey: contaId } }
+    - id: projector
+      archetype: compute.service
+      label: projetor-extrato
+      config:
+        instances: { min: 3, max: 6 }
+        vcpu: 1
+        zones: [a, b, c]
+        idempotency: { enabled: true, storeNodeId: read }
+        observability: { metrics: true, logs: true, tracing: true }
+    - { id: read, archetype: data.document, label: extrato-read-model, config: { partitionKey: contaId } }
+    - id: query
+      archetype: compute.service
+      label: extrato-service
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 180)) }}", max: "{{ max(6, ceil(baselineRps / 60)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - { id: cache, archetype: data.cache, label: cache-extrato, config: { nodes: 2, replicas: 1, multiAz: true, zones: [a, b] } }
+  edges:
+    - { id: e01, from: core, to: gw, config: { idempotencyKey: true } }
+    - { id: e02, from: gw, to: ledger, config: { timeoutMs: 400 } }
+    - { id: e03, from: ledger, to: db, config: { ops: [ { op: transaction, count: 1 } ] } }
+    - { id: e04, from: db, to: stream, interaction: cdc }
+    - { id: e05, from: stream, to: projector, config: { batchSize: 50 } }
+    - { id: e06, from: projector, to: read, config: { ops: [ { op: conditional-write, count: 1 } ] } }
+    - { id: e07, from: app, to: waf }
+    - { id: e08, from: waf, to: gw }
+    - { id: e09, from: gw, to: query, config: { timeoutMs: 190 } }
+    - { id: e10, from: query, to: cache, config: { ops: [ { op: read, count: 1 } ] } }
+    - { id: e11, from: query, to: read, config: { trigger: on-cache-miss, triggerOf: e10, ops: [ { op: read, count: 1 } ] } }
+  flows:
+    UC-1: [e01, e02, e03, e04, e05, e06]
+    UC-2: [e07, e08, e09, e10, e11]

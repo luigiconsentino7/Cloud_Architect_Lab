@@ -116,7 +116,10 @@ public sealed class OrderingRule : Rule
             if (plan is null) continue;
             foreach (var broker in plan.HappyPath.Select(c => c.Target).Where(n => Archetypes.IsMessaging(n.Archetype)).DistinctBy(n => n.Id))
             {
-                if (!GuaranteesOrder(context, broker))
+                // Consumidores que descartam sequência antiga tornam o processamento comutativo: a ordem do broker deixa de importar.
+                var consumers = plan.Calls.Where(c => c.Parent?.Target.Id == broker.Id && c.Edge!.Interaction == Interaction.AsyncConsume).ToList();
+                var sequenceChecked = consumers.Count > 0 && consumers.All(c => c.Target.Cfg.Bool("idempotency.sequenceCheck"));
+                if (!GuaranteesOrder(context, broker) && !sequenceChecked)
                 {
                     yield return context.Create(this,
                         $"{useCase.Id} exige ordem por chave, mas \"{broker.Label}\" não garante ordem: consumidores em paralelo podem processar eventos da mesma conta fora de ordem.",

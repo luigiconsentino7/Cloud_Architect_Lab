@@ -127,7 +127,7 @@ internal sealed class QueueNode : SimNode, IBroker
         var attempt = ++message.Attempt;
         _inFlight++;
         if (_fifo) _groupsInFlight.Add(message.Request.Key);
-        if (message.Request.UseCase.Spec.RequiresOrdering) World.Integrity.RecordOrder(message.Request);
+        if (message.Request.UseCase.Spec.RequiresOrdering) World.Integrity.RecordOrder(message.Request, SequenceCheck(message.Consumer));
 
         K.AfterMs(_visibilityMs, () =>
         {
@@ -244,7 +244,7 @@ internal sealed class TopicNode : SimNode, IBroker
 
         var message = new Message { Request = request, Publish = subscription, Consumer = subscription, Duplicate = duplicate };
         var exec = new Exec(request, subscription, message, this);
-        if (request.UseCase.Spec.RequiresOrdering) World.Integrity.RecordOrder(request);
+        if (request.UseCase.Spec.RequiresOrdering) World.Integrity.RecordOrder(request, SequenceCheck(subscription));
         target.Handle(exec, outcome =>
         {
             var crashed = outcome.Ok && World.Roll(World.Probability(FaultType.ConsumerCrash));
@@ -369,7 +369,7 @@ internal sealed class StreamNode : SimNode, IBroker
         state.InFlight = true;
         message.Deliveries++;
         OldestAgeMaxSeconds = Math.Max(OldestAgeMaxSeconds, (K.Now - message.EnqueuedUs) / 1_000_000.0);
-        if (message.Request.UseCase.Spec.RequiresOrdering) World.Integrity.RecordOrder(message.Request);
+        if (message.Request.UseCase.Spec.RequiresOrdering) World.Integrity.RecordOrder(message.Request, SequenceCheck(message.Consumer));
         var exec = new Exec(message.Request, consumerCall, message, this);
         consumer.Handle(exec, outcome =>
         {

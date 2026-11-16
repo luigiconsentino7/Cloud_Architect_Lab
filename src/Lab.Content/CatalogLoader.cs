@@ -184,7 +184,8 @@ public static class SchemaDefaults
             properties["idempotency"] ??= Parse("""
                 { "type": "object", "title": "Idempotência do consumidor", "properties": {
                   "enabled": { "type": "boolean", "default": false, "title": "Deduplicar mensagens" },
-                  "storeNodeId": { "type": "string", "title": "Armazenamento usado para dedupe" } } }
+                  "storeNodeId": { "type": "string", "title": "Armazenamento usado para dedupe" },
+                  "sequenceCheck": { "type": "boolean", "default": false, "title": "Descartar mensagens com sequência mais antiga" } } }
                 """);
         }
 

@@ -317,11 +317,14 @@ internal sealed class KeyValueNode : SimNode
 internal sealed class CacheNode : SimNode
 {
     private const double WarmupSeconds = 60;
+    private const double FailoverSeconds = 10;
     private readonly TokenBucket _bucket;
     private readonly bool _resilient;
     private readonly LatencyDist _read;
     private readonly LatencyDist _write;
-    private bool _down;
+    private readonly HashSet<string> _downZones = new(StringComparer.Ordinal);
+    private double _unavailableFraction;
+    private double _coldFraction;
     private long _recoveredAt = -1;
 
     public CacheNode(World world, Node node) : base(world, node)
@@ -336,7 +339,8 @@ internal sealed class CacheNode : SimNode
 
     public override void Handle(Exec exec, Action<Outcome> respond)
     {
-        if (!base.CanAccept() || _down)
+        // Os shards com primário na zona que caiu ficam indisponíveis (o resto do cluster segue atendendo).
+        if (!base.CanAccept() || (_unavailableFraction > 0 && Rng.Chance(_unavailableFraction)))
         {
             respond(Unavailable());
             return;
@@ -360,22 +364,36 @@ internal sealed class CacheNode : SimNode
     private double HitRatio(Exec exec)
     {
         var ratio = exec.Request.UseCase.Cacheability;
-        if (_recoveredAt < 0) return ratio;
-        var warmth = (K.Now - _recoveredAt) / 1_000_000.0 / WarmupSeconds;
-        return warmth >= 1 ? ratio : ratio * warmth;
+        if (_recoveredAt < 0 || _coldFraction <= 0) return ratio;
+        var warmth = Math.Min(1, (K.Now - _recoveredAt) / 1_000_000.0 / WarmupSeconds);
+        return ratio * (1 - (_coldFraction * (1 - warmth)));
     }
 
+    /// <summary>
+    /// Cluster com shards espalhados pelas zonas: a queda de uma zona atinge 1/N dos dados. Com réplica em outra zona,
+    /// esses shards fazem failover em ~10 s e voltam quentes; sem réplica, ficam fora até a zona voltar e voltam frios.
+    /// </summary>
     public override void OnZone(string zone, bool down)
     {
-        if (!Node.Placement.Zones.Contains(zone)) return;
+        var zones = Node.Placement.Zones;
+        if (!zones.Contains(zone)) return;
+        var share = zones.Count <= 1 ? 1.0 : 1.0 / zones.Count;
         if (down)
         {
-            _down = true;
-            if (_resilient) K.AfterMs(10_000, () => _down = false);
+            if (!_downZones.Add(zone)) return;
+            _unavailableFraction = Math.Min(1, _unavailableFraction + share);
+            if (_resilient)
+            {
+                K.AfterMs(FailoverSeconds * 1000, () =>
+                {
+                    if (_downZones.Remove(zone)) _unavailableFraction = Math.Max(0, _unavailableFraction - share);
+                });
+            }
         }
-        else if (_down && !_resilient)
+        else if (!_resilient && _downZones.Remove(zone))
         {
-            _down = false;
+            _unavailableFraction = Math.Max(0, _unavailableFraction - share);
+            _coldFraction = Math.Min(1, _coldFraction + share);
             _recoveredAt = K.Now;
         }
     }

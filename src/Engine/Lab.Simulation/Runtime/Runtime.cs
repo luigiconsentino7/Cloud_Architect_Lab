@@ -141,6 +141,7 @@ internal sealed class IntegrityLedger
     public long MonetaryDuplicates;
     public long LostEvents;
     public long OrderingViolations;
+    public long StaleDiscarded;
     public long DlqMessages;
 
     public void RecordEffect(Request request, string siteId, bool deduplicated, bool monetary)
@@ -162,12 +163,14 @@ internal sealed class IntegrityLedger
         }
     }
 
-    public void RecordOrder(Request request)
+    /// <param name="sequenceCheck">O consumidor compara a sequência e descarta a versão mais antiga: o estado fica certo.</param>
+    public void RecordOrder(Request request, bool sequenceCheck = false)
     {
         if (_lastSequence.Count > 200_000 && !_lastSequence.ContainsKey(request.Key)) return;
         if (_lastSequence.TryGetValue(request.Key, out var last) && request.KeySequence < last)
         {
-            if (request.Measured) OrderingViolations++;
+            if (sequenceCheck) StaleDiscarded++;
+            else if (request.Measured) OrderingViolations++;
             return;
         }
 

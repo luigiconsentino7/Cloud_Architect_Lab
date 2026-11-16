@@ -4,7 +4,8 @@ reviewedAt: "2026-11-15"
 components:
   - { id: client.web, archetype: client, displayName: "Navegador (web)", shortName: Web, shared: true, isDefault: true, aliases: [web, browser, navegador, site, frontend, usuario] }
   - { id: client.mobile, archetype: client, displayName: "App mobile", shortName: Mobile, shared: true, aliases: [app, mobile, celular, aplicativo, cliente] }
-  - { id: client.partner, archetype: client, displayName: "Sistema parceiro (B2B)", shortName: Parceiro, shared: true, aliases: [parceiro, partner, b2b, integrador, lojista] }
+  # Parceiros chegam por link dedicado ou rede privada: rede bem mais rápida que a internet do app (padrão 30/90 ms).
+  - { id: client.partner, archetype: client, displayName: "Sistema parceiro (B2B)", shortName: Parceiro, shared: true, aliases: [parceiro, partner, b2b, integrador, lojista], performance: { latency: { p50: 5, p99: 20 } } }
   - { id: external.system, archetype: external.system, displayName: "Sistema externo", shortName: Externo, shared: true, isDefault: true, aliases: [externo, terceiro] }
 
   - { id: generic.dns, archetype: edge.dns, displayName: DNS, isDefault: true, aliases: [dns] }

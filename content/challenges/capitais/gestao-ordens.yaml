@@ -1,0 +1,143 @@
+id: capitais/gestao-ordens
+version: 1
+title: Gestão de ordens da corretora
+summary: Receba ordens de compra e venda, reserve saldo e custódia, roteie à bolsa e nunca envie a mesma ordem duas vezes.
+track: capitais
+domain: mercado de capitais
+tags: [oms, ordens, idempotencia, bolsa, circuit-breaker]
+difficulties: [senior, staff]
+
+variables:
+  baselineRps:
+    description: Ordens por segundo num pregão normal
+    default: 800
+    step: 50
+    ranges: { senior: [400, 900], staff: [900, 1500] }
+
+narrative: |
+  A Corretora Prisma recebe {{ baselineRps | n0 }} ordens por segundo dos investidores pelo home broker e pelo app. Cada
+  ordem reserva o saldo (compra) ou a custódia (venda), é roteada para a bolsa e o investidor acompanha a execução.
+
+  A rede do investidor oscila e o app reenvia a ordem quando não recebe resposta: enviar a mesma ordem duas vezes à bolsa
+  é comprar o dobro. Se o roteamento para a bolsa ficar lento ou fora do ar, as ordens não podem sumir: ficam pendentes e
+  o investidor é avisado. Na abertura do pregão, o volume triplica.
+
+useCases:
+  - id: UC-1
+    name: Enviar ordem
+    description: Reserva atômica de saldo/custódia e roteamento à bolsa.
+    entryClient: client.web
+    monetary: true
+    requiredCapabilities:
+      - { capability: authenticate }
+      - { capability: idempotency-check, description: "A mesma ordem reenviada pelo app não vai à bolsa de novo." }
+      - { capability: atomic-balance-update, before: respond, description: "Saldo ou custódia reservados de forma atômica." }
+      - { capability: external-call, target: "external:bolsa", description: "A ordem é roteada à bolsa." }
+      - { capability: publish-event, description: "A ordem vira evento para acompanhamento e notificação." }
+    negativePaths:
+      - { dependency: "external:bolsa", expect: fallback, description: "Sem a bolsa, a ordem fica pendente e é reenviada depois." }
+  - id: UC-2
+    name: Acompanhar ordens
+    description: O investidor consulta o status das ordens do dia.
+    entryClient: client.web
+    requiredCapabilities:
+      - { capability: authenticate }
+
+externalSystems:
+  - { id: "external:bolsa", name: "Roteamento à bolsa", description: "Gateway de ordens para a bolsa", latency: { p50: 8ms, p99: 40ms }, availability: 0.9995, idempotent: true, sideEffect: true, monetary: true }
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 0.45, payloadKb: 1, computeCostMs: { p50: 2, p99: 8 } }
+    UC-2: { share: 0.55, payloadKb: 3, computeCostMs: { p50: 1, p99: 4 } }
+  cacheability: { UC-2: 0.6 }
+  dailyPattern: { peakHoursPerDay: 7, peakMultiplier: 1.5 }
+  storedGb: 200
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Pregão normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 30s, warmup: 10s } }
+    - id: abertura
+      name: Abertura do pregão (3x)
+      kind: load
+      visibility: public
+      load: { profile: ramp, fromRps: "{{ baselineRps }}", toRps: "{{ baselineRps * 3 }}", rampFor: 10s, holdFor: 30s, warmup: 10s }
+    - id: bolsa-lenta
+      name: Roteamento lento
+      kind: chaos
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: latency-injection, target: "external:bolsa", addMs: { p50: 300, p99: 2000 }, at: 10s, for: 20s } ]
+    - id: reenvios
+      name: Reenvios do app
+      kind: integrity
+      visibility: hidden
+      load: { ref: baseline }
+      faults:
+        - { type: client-retry, onTimeoutMs: 300, sameIdempotencyKey: true }
+        - { type: duplicate-delivery, probability: 0.02 }
+  slos:
+    - { id: SLO-1, useCase: UC-1, metric: latency.p99, max: 400ms, scenarios: [baseline, abertura], description: "ordem aceita em até 400 ms (p99)" }
+    - { id: SLO-2, useCase: UC-1, metric: success-rate, min: 99.95%, scenarios: [baseline, abertura, bolsa-lenta], description: "sucesso de 99,95%" }
+    - { id: SLO-3, metric: duplicate-effects, max: 0, scenarios: [reenvios], description: "nenhuma ordem duplicada" }
+    - { id: SLO-4, useCase: UC-2, metric: latency.p99, max: 300ms, scenarios: [baseline, abertura], description: "acompanhamento em até 300 ms (p99)" }
+
+constraints:
+  budgetUsdMonth: "{{ round(4000 + baselineRps * 28) }}"
+  dataResidencyBrazil: true
+  compliance: [bacen-4893]
+  requireEncryptionAtRest: true
+
+competencies: [consistencia, resiliencia, baixa-latencia]
+
+hints:
+  - { level: 1, text: "O app reenvia a ordem quando a rede cai. Como a corretora reconhece que é a mesma ordem?" }
+  - { level: 2, text: "Se a bolsa demora, o que o investidor deve ver: erro ou ordem pendente?" }
+  - { level: 3, text: "Chave de idempotência gravada na mesma transação da reserva; roteamento com timeout curto, circuit breaker e fila de pendentes." }
+
+clarifications:
+  - question: A bolsa aceita a mesma ordem duas vezes?
+    keywords: [bolsa, duplicada, clordid, repetida]
+    answer: "Não com o mesmo identificador (ClOrdID): ela rejeita a repetição. O problema é a corretora gerar uma ordem nova a cada reenvio do app."
+
+reference:
+  rationale: >-
+    O serviço de ordens grava a chave de idempotência e a reserva de saldo na mesma transação de um SQL distribuído
+    entre zonas, roteia à bolsa com timeout de 200 ms e circuit breaker, e manda para a fila de pendentes (via outbox)
+    quando o roteamento falha. Os eventos de ordem saem por outbox; o acompanhamento lê do cache e do banco no miss.
+  nodes:
+    - { id: web, component: client.web, label: Home broker }
+    - { id: waf, archetype: edge.waf, label: WAF }
+    - { id: gw, archetype: edge.api-gateway, label: API de ordens, config: { auth: jwt, waf: true, throttle: { rps: "{{ baselineRps * 6 }}", burst: "{{ baselineRps * 3 }}" } } }
+    - id: oms
+      archetype: compute.service
+      label: ordens-service
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 150)) }}", max: "{{ max(6, ceil(baselineRps / 50)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - id: db
+      archetype: data.relational-distributed
+      label: ordens-db
+      config: { nodes: "{{ max(3, ceil(baselineRps / 400)) }}" }
+      providers:
+        azure: { component: azure.cosmosdb, config: { partitionKey: contaId } }
+    - { id: bolsa, external: "external:bolsa", label: Bolsa }
+    - { id: pending, archetype: messaging.queue, label: ordens-pendentes, config: { dlq: { enabled: true, maxReceiveCount: 5 }, observability: { alarms: true } } }
+    - { id: events, archetype: messaging.queue, label: eventos-ordens, config: { dlq: { enabled: true, maxReceiveCount: 5 }, observability: { alarms: true } } }
+    - { id: cache, archetype: data.cache, label: cache-ordens, config: { nodes: 2, replicas: 1, multiAz: true, zones: [a, b] } }
+  edges:
+    - { id: e01, from: web, to: waf, config: { idempotencyKey: true } }
+    - { id: e02, from: waf, to: gw }
+    - { id: e03, from: gw, to: oms, config: { timeoutMs: 380 } }
+    - { id: e04, from: oms, to: db, config: { ops: [ { op: transaction, count: 1 } ] } }
+    - { id: e05, from: oms, to: bolsa, config: { timeoutMs: 200, circuitBreaker: { enabled: true, errorRateThreshold: 0.3, openMs: 10000 } } }
+    - { id: e06, from: oms, to: pending, config: { trigger: on-failure, triggerOf: e05, delivery: outbox } }
+    - { id: e07, from: oms, to: events, config: { delivery: outbox } }
+    - { id: e08, from: oms, to: cache, config: { ops: [ { op: read, count: 1 } ] } }
+    - { id: e09, from: oms, to: db, config: { trigger: on-cache-miss, triggerOf: e08, ops: [ { op: read, count: 1 } ] } }
+  flows:
+    UC-1: [e01, e02, e03, e04, e05, e06, e07]
+    UC-2: [e01, e02, e03, e08, e09]

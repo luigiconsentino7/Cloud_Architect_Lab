@@ -1,0 +1,141 @@
+id: investimentos/aporte-programado
+version: 1
+title: Aportes programados às 10h
+summary: Execute milhares de aportes agendados para o mesmo minuto sem derrubar o sistema e sem comprar duas vezes.
+track: investimentos
+domain: investimentos
+tags: [batch, fila, nivelamento-de-carga, idempotencia, custodia]
+difficulties: [junior, pleno, senior]
+
+variables:
+  baselineRps:
+    description: Requisições por segundo fora da janela das 10h
+    default: 300
+    step: 25
+    ranges: { junior: [100, 250], pleno: [250, 500], senior: [500, 900] }
+
+narrative: |
+  A Investe+ deixa o cliente agendar um aporte mensal: no dia escolhido, às 10h, o valor sai da conta e compra cotas do
+  fundo ou do título. Hoje os aportes rodam em sequência e terminam só à tarde. A ideia nova é disparar todos às 10h — e
+  o volume de execuções sobe dez vezes de uma vez.
+
+  Cada execução debita o saldo e envia a compra à custodiante, que não reconhece compras repetidas: se a mesma execução
+  rodar duas vezes, o cliente compra o dobro. O cliente quer saber em poucos minutos que o aporte foi feito.
+
+useCases:
+  - id: UC-1
+    name: Agendar aporte
+    description: O cliente agenda ou altera o aporte mensal.
+    entryClient: client.mobile
+    requiredCapabilities:
+      - { capability: authenticate }
+      - { capability: durable-write, before: respond }
+  - id: UC-2
+    name: Executar aporte
+    description: O agendador dispara a execução; débito, compra na custodiante e aviso ao cliente.
+    entryClient: client.partner
+    monetary: true
+    requiredCapabilities:
+      - { capability: idempotency-check, description: "A mesma execução não compra duas vezes." }
+      - { capability: atomic-balance-update, description: "Débito atômico do saldo." }
+      - { capability: external-call, target: "external:custodiante", description: "A compra vai para a custodiante." }
+      - { capability: notify, description: "O cliente é avisado do aporte." }
+
+externalSystems:
+  - { id: "external:custodiante", name: Custodiante, latency: { p50: 120ms, p99: 600ms }, availability: 0.999, rateLimitRps: "{{ round(baselineRps * 4) }}", idempotent: false, sideEffect: true, monetary: true }
+  - { id: "external:push", name: "Provedor de push", latency: { p50: 80ms, p99: 300ms }, availability: 0.999, idempotent: false, sideEffect: true }
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 0.3, payloadKb: 1, computeCostMs: { p50: 2, p99: 6 } }
+    UC-2: { share: 0.7, payloadKb: 1, computeCostMs: { p50: 2, p99: 8 } }
+  dailyPattern: { peakHoursPerDay: 1, peakMultiplier: 6 }
+  storedGb: 100
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Dia normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 30s, warmup: 10s } }
+    - id: dez-horas
+      name: Disparo das 10h (10x)
+      kind: load
+      visibility: public
+      load: { profile: spike, baseRps: "{{ baselineRps }}", peakRps: "{{ baselineRps * 10 }}", at: 12s, for: 15s, duration: 40s, warmup: 10s }
+    - id: reexecucoes
+      name: Reexecuções e reentregas
+      kind: integrity
+      visibility: hidden
+      load: { ref: baseline }
+      faults:
+        - { type: duplicate-delivery, probability: 0.03 }
+        - { type: consumer-crash, probability: 0.01 }
+  slos:
+    - { id: SLO-1, useCase: UC-1, metric: latency.p99, max: 500ms, scenarios: [baseline, dez-horas], description: "agendamento em até 500 ms (p99)" }
+    - { id: SLO-2, useCase: UC-2, metric: success-rate, min: 99.9%, scenarios: [baseline, dez-horas], description: "disparo aceito com 99,9% de sucesso" }
+    - { id: SLO-3, useCase: UC-2, metric: async-completion.p95, max: 2min, scenarios: [dez-horas], description: "aporte concluído em até 2 minutos (p95)" }
+    - { id: SLO-4, metric: duplicate-effects, max: 0, scenarios: [reexecucoes], description: "nenhuma compra duplicada" }
+    - { id: SLO-5, metric: lost-events, max: 0, scenarios: [reexecucoes], description: "nenhum aporte perdido" }
+
+constraints:
+  budgetUsdMonth: "{{ round(1500 + baselineRps * 30) }}"
+  dataResidencyBrazil: true
+  compliance: [lgpd]
+  requireEncryptionAtRest: true
+
+competencies: [mensageria, consistencia, escalabilidade]
+
+hints:
+  - { level: 1, text: "A custodiante aceita um número limitado de compras por segundo. O que acontece se todos os aportes chegarem a ela ao mesmo tempo?" }
+  - { level: 2, text: "O disparo não precisa esperar a compra terminar. Onde as execuções esperam a vez?" }
+  - { level: 3, text: "Fila entre o disparo e a execução (nivelamento de carga), consumidor idempotente com dedupe antes da custodiante e DLQ." }
+
+clarifications:
+  - question: O cliente precisa ver a compra na hora do disparo?
+    keywords: [na hora, imediato, aviso, tempo]
+    answer: Não. Um aviso em até dois minutos depois do disparo é suficiente.
+
+reference:
+  rationale: >-
+    O disparo das 10h só grava a execução numa fila e responde: a fila absorve o pico e os consumidores trabalham no
+    ritmo que a custodiante aguenta. O consumidor é idempotente: registra a execução com escrita condicional antes de
+    debitar e comprar, então reentregas e retomadas depois de crash não compram de novo. O aviso sai do mesmo consumidor.
+  nodes:
+    - { id: app, component: client.mobile, label: App }
+    - { id: scheduler, component: client.partner, label: Agendador }
+    - { id: waf, archetype: edge.waf, label: WAF }
+    - { id: gw, archetype: edge.api-gateway, label: API de aportes, config: { auth: jwt, waf: true, throttle: { rps: "{{ baselineRps * 15 }}", burst: "{{ baselineRps * 8 }}" } } }
+    - id: api
+      archetype: compute.service
+      label: aportes-service
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 60)) }}", max: "{{ max(6, ceil(baselineRps / 20)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - { id: db, archetype: data.key-value, label: aportes, config: { partitionKey: clienteId } }
+    - { id: queue, archetype: messaging.queue, label: execucoes, config: { visibilityTimeoutSeconds: 60, dlq: { enabled: true, maxReceiveCount: 5 }, observability: { alarms: true } } }
+    - id: worker
+      archetype: compute.service
+      label: executor
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 40)) }}", max: "{{ max(6, ceil(baselineRps / 15)) }}" }
+        vcpu: 1
+        zones: [a, b, c]
+        idempotency: { enabled: true, storeNodeId: db }
+        observability: { metrics: true, logs: true, tracing: true }
+    - { id: custody, external: "external:custodiante", label: Custodiante }
+    - { id: push, external: "external:push", label: Push }
+  edges:
+    - { id: e01, from: app, to: waf }
+    - { id: e02, from: waf, to: gw }
+    - { id: e03, from: gw, to: api, config: { timeoutMs: 450 } }
+    - { id: e04, from: api, to: db, config: { ops: [ { op: write, count: 1 } ] } }
+    - { id: e05, from: scheduler, to: gw, config: { idempotencyKey: true } }
+    - { id: e06, from: api, to: queue }
+    - { id: e07, from: queue, to: worker }
+    - { id: e08, from: worker, to: db, config: { ops: [ { op: transaction, count: 1 } ] } }
+    - { id: e09, from: worker, to: custody, config: { timeoutMs: 2000, retries: { max: 2, backoff: exponential-jitter, baseMs: 500 } } }
+    - { id: e10, from: worker, to: push, config: { timeoutMs: 1000 } }
+  flows:
+    UC-1: [e01, e02, e03, e04]
+    UC-2: [e05, e03, e06, e07, e08, e09, e10]

@@ -31,6 +31,9 @@ internal abstract class SimNode
 
     protected Rng Rng { get; }
 
+    /// <summary>O consumidor compara a sequência da mensagem e descarta versões antigas (último estado vence).</summary>
+    protected static bool SequenceCheck(Lab.Ir.Flows.CallNode consumer) => consumer.Target.Cfg.Bool("idempotency.sequenceCheck");
+
     protected SimKernel K => World.Kernel;
 
     protected PerformanceProfile Perf => Definition.Performance;

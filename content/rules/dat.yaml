@@ -1,0 +1,109 @@
+# Textos curados das regras de consistência e integridade de dados (DAT).
+rules:
+  - id: DAT-001
+    title: Dual-write sem outbox
+    why: >-
+      Gravar no banco e publicar o evento como duas operações separadas deixa uma janela de inconsistência: se o processo
+      cair entre as duas, o evento se perde (o recebedor nunca é avisado) ou sai sem o registro (aviso de algo que não aconteceu).
+    how: >-
+      Use o outbox transacional: grave o evento numa tabela de saída na mesma transação da escrita e publique a partir
+      dela (relay ou CDC). O consumidor precisa ser idempotente, porque o relay pode publicar duas vezes.
+    tradeoffs: O outbox adiciona latência de publicação e um componente (relay ou CDC) para operar.
+    followUps:
+      - Se o processo cair entre gravar no banco e publicar o evento, como o evento chega ao destino?
+    studyTopics: [outbox transacional, change data capture]
+    links:
+      - { title: "AWS Prescriptive Guidance — Transactional outbox pattern", url: "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html" }
+      - { title: "Azure Architecture Center — Transactional Outbox pattern with Azure Cosmos DB", url: "https://learn.microsoft.com/azure/architecture/databases/guide/transactional-outbox-cosmos" }
+
+  - id: DAT-002
+    title: Consumidor sem idempotência
+    why: >-
+      Filas e tópicos entregam pelo menos uma vez: reentregas acontecem em timeout de visibilidade, rebalanceamento e
+      retry. Um consumidor que aplica o efeito sem deduplicar transforma cada reentrega num efeito duplicado — push
+      repetido ou, num fluxo monetário, crédito em dobro.
+    how: >-
+      Dê a cada mensagem um identificador de negócio (endToEndId, id da transação) e registre o que já foi processado num
+      armazenamento de dedupe com escrita condicional, na mesma unidade de trabalho do efeito sempre que possível.
+    tradeoffs: O armazenamento de dedupe precisa de retenção maior que a janela de reentrega e tem custo por escrita.
+    followUps:
+      - Como você garante que uma mensagem reentregue não produz um segundo efeito?
+    studyTopics: [consumidor idempotente, entrega pelo menos uma vez]
+    links:
+      - { title: "AWS Builders' Library — Making retries safe with idempotent APIs", url: "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/" }
+      - { title: "Azure Architecture Center — Competing Consumers pattern", url: "https://learn.microsoft.com/azure/architecture/patterns/competing-consumers" }
+
+  - id: DAT-003
+    title: Comando monetário sem chave de idempotência
+    why: >-
+      O app repete a requisição quando a rede oscila ou o timeout estoura. Sem uma chave de idempotência, o servidor não
+      tem como saber que é a mesma transação e processa o PIX, a compra ou o resgate de novo.
+    how: >-
+      Exija uma chave de idempotência gerada pelo cliente (cabeçalho Idempotency-Key ou id da transação), grave-a com
+      escrita condicional antes do efeito e devolva o resultado original quando ela se repetir.
+    tradeoffs: A chave precisa de expiração e de uma resposta consistente para a requisição repetida em andamento.
+    followUps:
+      - O que o servidor responde quando chega a mesma chave enquanto a primeira requisição ainda está em processamento?
+    studyTopics: [APIs idempotentes, chave de idempotência]
+    links:
+      - { title: "AWS Builders' Library — Making retries safe with idempotent APIs", url: "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/" }
+
+  - id: DAT-004
+    title: Ordenação exigida sem garantia do broker
+    why: >-
+      Filas padrão e tópicos sem chave entregam fora de ordem. Se o caso de uso depende da ordem por conta ou por ordem de
+      compra (débito antes do estorno, cancelamento depois da criação), o estado final fica errado.
+    how: >-
+      Use um broker com ordenação por chave (fila FIFO com grupo de mensagem, stream particionado pela chave) e um
+      consumidor por partição, ou torne o processamento comutativo com números de sequência.
+    tradeoffs: Ordenação limita o paralelismo à quantidade de chaves e partições.
+    followUps:
+      - O que acontece se o estorno de uma transação for processado antes do débito?
+    studyTopics: [ordenação por chave, filas FIFO]
+    links:
+      - { title: "Amazon SQS — FIFO queues", url: "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues.html" }
+
+  - id: DAT-005
+    title: Saldo atualizado sem controle de concorrência
+    why: >-
+      Duas transações lendo o mesmo saldo e gravando o resultado ao mesmo tempo produzem uma atualização perdida: o
+      cliente gasta duas vezes o mesmo dinheiro.
+    how: >-
+      Atualize o saldo numa transação com bloqueio adequado ou com escrita condicional (compare-and-set sobre a versão ou
+      sobre "saldo ≥ valor"). Em ledgers, prefira lançamentos imutáveis com saldo derivado.
+    tradeoffs: Bloqueios serializam a conta quente; escrita condicional exige tratar conflito e repetir.
+    followUps:
+      - O que impede duas compras simultâneas de usar o mesmo limite disponível?
+    studyTopics: [controle de concorrência otimista, ledger de partidas dobradas]
+    links:
+      - { title: "Amazon DynamoDB — Transactions", url: "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transactions.html" }
+
+  - id: DAT-006
+    title: Cache usado como fonte da verdade
+    why: >-
+      Cache expira, é despejado sob pressão de memória e pode perder dados num failover. Saldo ou limite que vivem só no
+      cache somem ou voltam para um valor antigo.
+    how: >-
+      Mantenha o saldo e o limite num armazenamento durável e use o cache só para leitura (cache-aside), com invalidação
+      na escrita e TTL curto.
+    tradeoffs: Ler sempre do banco custa latência; o cache-aside exige lidar com dado levemente desatualizado na leitura.
+    followUps:
+      - Se o cache reiniciar agora, de onde vem o saldo correto?
+    studyTopics: [cache-aside, fonte da verdade]
+    links:
+      - { title: "Azure Architecture Center — Cache-Aside pattern", url: "https://learn.microsoft.com/azure/architecture/patterns/cache-aside" }
+
+  - id: DAT-008
+    title: RPO zero com replicação assíncrona
+    why: >-
+      O desafio exige não perder nenhuma transação confirmada (RPO = 0), mas a replicação assíncrona confirma antes de
+      copiar: numa falha, o que estava em trânsito se perde.
+    how: >-
+      Use replicação síncrona (standby síncrono em outra zona, banco com consenso entre zonas) para os dados que exigem
+      RPO zero, e deixe a replicação assíncrona para cópias de leitura e para outra região.
+    tradeoffs: Replicação síncrona soma latência na escrita, e entre regiões costuma ser cara demais.
+    followUps:
+      - Quantas transações confirmadas você perde se a zona do primário cair agora?
+    studyTopics: [RPO e RTO, replicação síncrona]
+    links:
+      - { title: "AWS Well-Architected — Reliability Pillar", url: "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html" }

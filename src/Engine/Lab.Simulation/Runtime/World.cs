@@ -353,11 +353,12 @@ internal sealed class World
         Invoke(exec, child, outcome =>
         {
             var edge = child.Edge!;
+            // O cache é otimização: leitura que falha vira miss (vai à fonte) e escrita que falha não derruba a requisição.
             if (child.Target.Archetype == Archetypes.Cache)
             {
                 var isRead = edge.Config.Ops?.Any(o => o.Op == DataOpKind.Read) ?? true;
                 if (isRead && (!outcome.Ok || !outcome.CacheHit)) exec.MarkMiss(edge.Id);
-                done(isRead ? Outcome.Success : outcome);
+                done(Outcome.Success);
                 return;
             }
 

@@ -1,0 +1,163 @@
+id: ledger/partidas-dobradas
+version: 1
+title: Ledger de partidas dobradas
+summary: Registre transferências internas como lançamentos de débito e crédito atômicos, auditáveis e sem perda.
+track: ledger
+domain: core bancário
+tags: [ledger, partidas-dobradas, transacao, auditoria, rpo]
+difficulties: [pleno, senior, staff]
+
+variables:
+  baselineRps:
+    description: Lançamentos por segundo num dia normal
+    default: 700
+    step: 50
+    ranges: { pleno: [200, 500], senior: [500, 1000], staff: [1000, 1500] }
+
+twists:
+  - id: fechamento-mensal
+    title: Fechamento do mês
+    description: No último dia útil, o volume de lançamentos quadruplica por alguns minutos.
+    minDifficulty: senior
+    ops:
+      - op: append
+        path: testPlan.scenarios
+        value:
+          id: fechamento
+          name: Fechamento do mês (4x)
+          kind: load
+          visibility: hidden
+          load: { profile: spike, baseRps: "{{ baselineRps }}", peakRps: "{{ baselineRps * 4 }}", at: 12s, for: 15s, duration: 35s, warmup: 10s }
+      - { op: append, path: "testPlan.slos[SLO-2].scenarios", value: fechamento }
+
+narrative: |
+  O Banco Horizonte está trocando o core bancário legado por um ledger próprio. Toda movimentação interna (transferência
+  entre contas, tarifa, estorno) vira dois lançamentos — um débito e um crédito — que precisam acontecer juntos ou não
+  acontecer. São {{ baselineRps | n0 }} lançamentos por segundo, e o dobro no início do mês.
+
+  O compliance exige trilha de auditoria imutável e nenhuma transação confirmada pode se perder numa falha (RPO zero).
+  Os sistemas que chamam o ledger repetem a requisição quando não recebem resposta.
+
+useCases:
+  - id: UC-1
+    name: Lançar transferência interna
+    description: Débito e crédito atômicos, com auditoria.
+    entryClient: client.partner
+    monetary: true
+    requiredCapabilities:
+      - { capability: authenticate, description: "Só sistemas internos autorizados lançam." }
+      - { capability: idempotency-check, description: "A mesma requisição repetida não gera novos lançamentos." }
+      - { capability: atomic-balance-update, before: respond, description: "Débito e crédito na mesma transação." }
+      - { capability: publish-event, description: "Os lançamentos viram eventos para extrato e contabilidade." }
+      - { capability: audit-log, description: "Cada lançamento entra numa trilha imutável." }
+  - id: UC-2
+    name: Consultar saldo
+    description: Saldo atual da conta, sempre consistente com os lançamentos.
+    entryClient: client.partner
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 0.6, payloadKb: 2, computeCostMs: { p50: 3, p99: 10 } }
+    UC-2: { share: 0.4, payloadKb: 1, computeCostMs: { p50: 1, p99: 4 } }
+  dailyPattern: { peakHoursPerDay: 3, peakMultiplier: 2 }
+  storedGb: 500
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Dia normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 30s, warmup: 10s } }
+    - id: inicio-do-mes
+      name: Início do mês (2x)
+      kind: load
+      visibility: public
+      load: { profile: ramp, fromRps: "{{ baselineRps }}", toRps: "{{ baselineRps * 2 }}", rampFor: 10s, holdFor: 30s, warmup: 10s }
+    - id: az-outage
+      name: Queda de uma zona
+      kind: chaos
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: zone-outage, zone: a, at: 12s, for: 15s } ]
+    - id: repeticoes
+      name: Repetições dos chamadores
+      kind: integrity
+      visibility: hidden
+      load: { ref: baseline }
+      faults:
+        - { type: client-retry, onTimeoutMs: 400, sameIdempotencyKey: true }
+        - { type: duplicate-delivery, probability: 0.02 }
+  slos:
+    - { id: SLO-1, useCase: UC-1, metric: latency.p99, max: 300ms, scenarios: [baseline, inicio-do-mes], description: "lançamento em até 300 ms (p99)" }
+    - { id: SLO-2, useCase: UC-1, metric: success-rate, min: 99.95%, scenarios: [baseline, inicio-do-mes, az-outage], description: "sucesso de 99,95%" }
+    - { id: SLO-3, metric: duplicate-effects, max: 0, scenarios: [repeticoes], description: "nenhum lançamento duplicado" }
+    - { id: SLO-4, metric: lost-events, max: 0, scenarios: [az-outage, repeticoes], description: "nenhum evento perdido" }
+    - { id: SLO-5, useCase: UC-2, metric: latency.p99, max: 150ms, scenarios: [baseline], description: "saldo em até 150 ms (p99)" }
+
+constraints:
+  budgetUsdMonth: "{{ round(4000 + baselineRps * 44) }}"
+  dataResidencyBrazil: true
+  compliance: [bacen-4893]
+  requireEncryptionAtRest: true
+  requireAuditLog: true
+  rpoSeconds: 0
+
+competencies: [consistencia, resiliencia, seguranca]
+
+weights: { functional: 20, performance: 15, resilience: 15, consistency: 30, security: 10, cost: 5, operability: 5 }
+
+hints:
+  - { level: 1, text: "Débito e crédito são uma unidade. O que garante que os dois acontecem, ou nenhum?" }
+  - { level: 2, text: "RPO zero: a confirmação só pode sair depois que o dado está em mais de uma zona." }
+  - { level: 3, text: "Transação num banco com replicação síncrona entre zonas, evento via outbox e auditoria append-only fora do caminho síncrono." }
+
+clarifications:
+  - question: O saldo pode vir de um cache?
+    keywords: [cache, saldo, consistente]
+    answer: Não. O saldo consultado precisa refletir todos os lançamentos confirmados.
+  - question: A auditoria precisa estar na resposta?
+    keywords: [auditoria, síncrono, resposta]
+    answer: Não. Ela precisa ser completa e imutável, mas pode ser gravada alguns segundos depois.
+
+reference:
+  rationale: >-
+    Os dois lançamentos e a chave de idempotência gravam numa única transação de um SQL distribuído com replicação
+    síncrona entre zonas (RPO zero, sem janela de failover). O evento sai pelo outbox; um consumidor idempotente grava a
+    trilha de auditoria num armazenamento de objetos com bloqueio (WORM). O saldo é lido do próprio banco.
+  nodes:
+    - { id: core, component: client.partner, label: Sistemas internos }
+    - { id: gw, archetype: edge.api-gateway, label: API do ledger, config: { auth: mtls, throttle: { rps: "{{ baselineRps * 10 }}", burst: "{{ baselineRps * 5 }}" } } }
+    - id: svc
+      archetype: compute.service
+      label: ledger-service
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 120)) }}", max: "{{ max(6, ceil(baselineRps / 40)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - id: db
+      archetype: data.relational-distributed
+      label: lancamentos
+      config: { nodes: "{{ max(3, ceil(baselineRps / 350)) }}" }
+      providers:
+        azure: { component: azure.cosmosdb, config: { partitionKey: contaId } }
+    - { id: events, archetype: messaging.queue, label: lancamentos-eventos, config: { dlq: { enabled: true, maxReceiveCount: 5 }, observability: { alarms: true } } }
+    - id: auditor
+      archetype: compute.function
+      label: auditoria
+      config:
+        reservedConcurrency: 500
+        idempotency: { enabled: true, storeNodeId: dedupe }
+        observability: { metrics: true, logs: true, tracing: true }
+    - { id: dedupe, archetype: data.key-value, label: dedupe-auditoria }
+    - { id: audit, archetype: data.object-storage, label: trilha-auditoria, config: { objectLock: true, versioning: true } }
+  edges:
+    - { id: e01, from: core, to: gw, config: { idempotencyKey: true } }
+    - { id: e02, from: gw, to: svc, config: { timeoutMs: 280 } }
+    - { id: e03, from: svc, to: db, config: { ops: [ { op: transaction, count: 1 } ] } }
+    - { id: e04, from: svc, to: events, config: { delivery: outbox } }
+    - { id: e05, from: events, to: auditor, config: { batchSize: 10 } }
+    - { id: e06, from: auditor, to: dedupe, config: { ops: [ { op: conditional-write, count: 1 } ] } }
+    - { id: e07, from: auditor, to: audit, config: { ops: [ { op: write, count: 1 } ] } }
+    - { id: e08, from: svc, to: db, config: { ops: [ { op: read, count: 1 } ] } }
+  flows:
+    UC-1: [e01, e02, e03, e04, e05, e06, e07]
+    UC-2: [e01, e02, e08]
