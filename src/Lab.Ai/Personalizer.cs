@@ -34,6 +34,8 @@ public sealed class ChallengePersonalizer(AiRuntime runtime, PromptLibrary promp
             if (validated is null)
             {
                 logger.LogInformation("Personalização descartada: a resposta do modelo não passou na validação.");
+                // O conteúdo só vai para depuração (o log padrão não guarda texto de conversa); os evals o mostram.
+                logger.LogDebug("Resposta descartada do modelo: {Resposta}", AiText.Clean(response.Text, 240));
                 return null;
             }
 

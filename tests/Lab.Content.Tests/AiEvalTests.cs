@@ -56,6 +56,62 @@ public sealed partial class AiEvalTests
     }
 
     [Fact]
+    public async Task Falha_do_ollama_vira_erro_e_nao_reprova_o_modelo()
+    {
+        var runner = new AiEvalRunner(Content, Prompts, TextWriter.Null);
+
+        var report = await runner.RunAsync(Runtime(new DeadModel()), [PromptRoles.Interviewer, PromptRoles.Mapper], 2, TestContext.Current.CancellationToken);
+
+        report.Cases.Count.ShouldBe(4);
+        report.Cases.ShouldAllBe(c => c.Error && !c.Passed, string.Join("; ", report.Cases.Select(c => c.Detail)));
+        report.Cases[0].Detail.ShouldContain("erro ao falar com o Ollama");
+        report.Cases[0].Detail.ShouldContain("conexão recusada");
+        report.PassRate(PromptRoles.Interviewer).ShouldBe(0);
+        report.Speed.ShouldBeNull();
+        report.SpeedError.ShouldNotBeNull().ShouldContain("HttpRequestException");
+        report.Complete.ShouldBeFalse();
+        report.MeetsS4.ShouldBeFalse();
+
+        var markdown = AiEvalReport.Markdown([report], "http://127.0.0.1:9", new DateTime(2026, 11, 16, 9, 0, 0));
+        markdown.ShouldContain("só erros");
+        markdown.ShouldContain("| ? |");
+        markdown.ShouldContain("Dados incompletos (?)");
+        markdown.ShouldContain("Velocidade não medida");
+        markdown.ShouldNotContain("Sugestão de modelo padrão");
+    }
+
+    [Fact]
+    public async Task Erro_de_conexao_fica_fora_da_porcentagem_do_que_foi_respondido()
+    {
+        var runner = new AiEvalRunner(Content, Prompts, TextWriter.Null);
+
+        // chamada 1 = aquecimento; 2 = "eventos" (ok); 3 = "PDF" (o Ollama cai); 4 = "regras" (ok)
+        var report = await runner.RunAsync(Runtime(new RightModel { FailOnCall = 3 }), [PromptRoles.Mapper], 3, TestContext.Current.CancellationToken);
+
+        report.Errors.ShouldBe(1);
+        report.For(PromptRoles.Mapper).Where(c => !c.Error).ShouldAllBe(c => c.Passed);
+        report.PassRate(PromptRoles.Mapper).ShouldBe(1.0); // 2 respondidos, 2 certos: o erro não conta contra o modelo
+        var markdown = AiEvalReport.Markdown([report], "http://127.0.0.1:9", DateTime.Now);
+        markdown.ShouldContain("2/2 (100%)");
+        markdown.ShouldContain("1 com erro");
+    }
+
+    [Fact]
+    public async Task Narrativa_rejeitada_explica_o_motivo_em_vez_de_virar_erro()
+    {
+        var runner = new AiEvalRunner(Content, Prompts, TextWriter.Null) { NarrationEventBudget = 1_000_000 };
+
+        var report = await runner.RunAsync(Runtime(new RightModel { InventNumbers = true }), [PromptRoles.Narrator], 1, TestContext.Current.CancellationToken);
+
+        var narration = report.For(PromptRoles.Narrator).Single();
+        narration.Error.ShouldBeFalse();
+        narration.Passed.ShouldBeFalse();
+        narration.Detail.ShouldContain("duas tentativas");
+        narration.Detail.ShouldContain("cita números que não estão na revisão");
+        narration.Detail.ShouldContain("98.765");
+    }
+
+    [Fact]
     public async Task Narrador_comenta_a_revisao_da_referencia_degradada()
     {
         var runner = new AiEvalRunner(Content, Prompts, TextWriter.Null) { NarrationEventBudget = 1_000_000 };
@@ -76,19 +132,44 @@ public sealed partial class AiEvalTests
 
         var report = await runner.RunAsync(Runtime(leaky), [PromptRoles.Interviewer, PromptRoles.Mapper], null, TestContext.Current.CancellationToken);
 
+        report.Errors.ShouldBe(0); // resposta errada é reprovação, não erro de conexão
         report.For(PromptRoles.Interviewer).Where(c => c.Flags.ContainsKey("no-spoiler")).ShouldAllBe(c => !c.Passed);
         report.For(PromptRoles.Mapper).Count(c => c.Passed).ShouldBe(2); // só as duas anotações ("nenhum")
         report.MeetsS4.ShouldBeTrue(); // sem personalizador no relatório, o S4 olha só a velocidade
     }
 
+    /// <summary>Ollama que caiu: toda chamada falha.</summary>
+    private sealed class DeadModel : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new HttpRequestException("conexão recusada");
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new HttpRequestException("conexão recusada");
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
     /// <summary>Responde como um modelo bom responderia, lendo o que o prompt manda.</summary>
     private sealed partial class RightModel : IChatClient
     {
+        private int _calls;
+
         public bool LeakReference { get; init; }
         public bool AlwaysNone { get; init; }
 
+        /// <summary>A chamada de número N (1 é o aquecimento do modelo) falha como se o Ollama tivesse caído.</summary>
+        public int FailOnCall { get; init; }
+
+        public bool InventNumbers { get; init; }
+
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
+            if (++_calls == FailOnCall) throw new HttpRequestException("conexão recusada");
             var list = messages.ToList();
             var system = list[0].Text;
             var user = list.Last(m => m.Role == ChatRole.User).Text;
@@ -108,10 +189,14 @@ public sealed partial class AiEvalTests
             }
             else if (system.StartsWith("Você é um mentor", StringComparison.Ordinal))
             {
-                var review = JsonNode.Parse(user[(user.IndexOf("<revisao>", StringComparison.Ordinal) + 9)..user.IndexOf("</revisao>", StringComparison.Ordinal)])!;
-                var score = Regex.Match(user, @"Nota final: (\d+)").Groups[1].Value;
+                // Na retentativa o último "user" é a correção; a revisão está na primeira mensagem.
+                var request = list.First(m => m.Role == ChatRole.User).Text;
+                var review = JsonNode.Parse(request[(request.IndexOf("<revisao>", StringComparison.Ordinal) + 9)..request.IndexOf("</revisao>", StringComparison.Ordinal)])!;
+                var score = Regex.Match(request, @"Nota final: (\d+)").Groups[1].Value;
                 var top = review["melhorias"]?[0]?["titulo"]?.GetValue<string>() ?? "";
-                text = JsonSerializer.Serialize(new { paragraphs = new[] { $"Nota {score}: o ponto que mais pesou foi {Regex.Replace(top, @"\d", "")}." } });
+                text = InventNumbers
+                    ? JsonSerializer.Serialize(new { paragraphs = new[] { $"Nota {score}, mas o p99 chegou a 98.765 ms." } })
+                    : JsonSerializer.Serialize(new { paragraphs = new[] { $"Nota {score}: o ponto que mais pesou foi {Regex.Replace(top, @"\d", "")}." } });
             }
             else if (user.Contains("Quantas", StringComparison.Ordinal) || user.Contains("volume", StringComparison.Ordinal))
             {

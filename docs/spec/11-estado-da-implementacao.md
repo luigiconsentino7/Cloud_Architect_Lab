@@ -27,7 +27,8 @@ Todos os 21 itens do backlog do MVP ([10](10-roadmap-e-riscos.md#backlog-do-mvp-
 | Spec | Implementação | Por quê |
 |---|---|---|
 | Modelo padrão "definido no spike S4" | `qwen2.5:3b`, configurável em `Ai:Ollama:Model`; o spike S4 é o comando `lab ai eval`, que compara modelos na máquina do usuário e sugere o padrão | Os evals precisam da GPU da máquina de referência; o comando existe e foi validado contra um Ollama simulado |
-| Opções `Ai:Ollama:{Endpoint, Model}` e `keep_alive` | `Ai:Ollama:{Endpoint, Model, ContextTokens, TimeoutSeconds}`; `keep_alive` fica no padrão do Ollama (5 min) | O contexto de 8 mil tokens vai como `num_ctx`; o tempo limite faz o app cair para o modo sem IA em vez de travar |
+| Opções `Ai:Ollama:{Endpoint, Model}` e `keep_alive` | `Ai:Ollama:{Endpoint, Model, ContextTokens, TimeoutSeconds, ProbeTimeoutMs}`; `keep_alive` fica no padrão do Ollama (5 min); o endpoint padrão é `http://127.0.0.1:11434` | O contexto de 8 mil tokens vai como `num_ctx`; o tempo limite faz o app cair para o modo sem IA em vez de travar; no Windows, `localhost` tenta o IPv6 primeiro e a primeira conexão perdia segundos |
+| Detecção do Ollama no modo `auto` | Checagem paciente (4 s, repetida se só demorou), que mantém a IA ligada por 2 min se o Ollama estava bom e engasgou, lembra de uma falha por 5 s e do sucesso por 30 s | Uma checagem de 1,5 s derrubava a IA por 30 s num engasgo (visto num `lab ai eval` real no Windows: o narrador e o mapeador saíram "reprovados" sem o modelo ter sido chamado) |
 | `IInterviewer.ReplyAsync` devolve `IAsyncEnumerable<string>` | `AnswerAsync(request, onDelta, ct)` devolve a resposta final com a origem (`ia` ou `curado`) e recebe os pedaços por callback | A resposta precisa dizer de onde veio (selo na interface) e os pedaços vão direto para o SignalR |
 | `IReviewNarrator` devolve sempre uma narrativa | Devolve nula quando a narrativa cita número que a revisão não tem (depois de uma chance de corrigir); falha do modelo sobe para o job tentar de novo | Só texto conferido chega à tela; falha transitória do Ollama é retentada com backoff |
 | Narrador confere números e componentes citados | Confere os números; componentes não são checados | Nomes de componentes são texto livre do usuário, sem um jeito confiável de conferir; o prompt proíbe inventar |
@@ -80,7 +81,11 @@ Todos os 21 itens do backlog do MVP ([10](10-roadmap-e-riscos.md#backlog-do-mvp-
 
 ## O que fica para as próximas fases ([10](10-roadmap-e-riscos.md))
 
-- Rodar `lab ai eval` na máquina de referência (RTX 3050, 4 GB) com 2–3 modelos de 3–4B e fixar o modelo padrão.
+- Rodar `lab ai eval` na máquina de referência (RTX 3050, 4 GB) com 2–3 modelos de 3–4B e fixar o modelo padrão. A
+  primeira rodada real (16/11/2026, `gemma3:4b`) deu personalizador 12/12 e entrevistador 8/8 (≈ 2 s por resposta;
+  ≈ 15 s por personalização); os resultados do narrador e do mapeador daquela rodada são inválidos (o bug de checagem
+  acima) e a velocidade não foi medida: falta repetir com o runner corrigido, que separa erro do Ollama de resposta
+  errada, e comparar com o `qwen2.5:3b`.
 - Fase 2: replay da simulação no canvas, comparação entre tentativas, cenários extras (soak, queda de região, crash
   entre gravar e publicar), recomendador, 25+ conquistas, ponte manual com o claude.ai, porta `IFlowRanker`, métricas
   OpenTelemetry e motor em WebAssembly no CI.

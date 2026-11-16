@@ -10,25 +10,74 @@ using Lab.Ir.Challenges;
 using Lab.Pipeline;
 using Lab.Pipeline.Seeds;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace Lab.Cli;
 
 /// <param name="Flags">Critérios parciais do caso (ex.: delta válido, monta o desafio, aderente ao contexto).</param>
-public sealed record EvalCaseResult(string Role, string Case, bool Passed, double Seconds, string Detail, IReadOnlyDictionary<string, bool> Flags);
+/// <param name="Error">O Ollama falhou (conexão, tempo esgotado): não é resposta errada, e o caso não entra na conta.</param>
+public sealed record EvalCaseResult(string Role, string Case, bool Passed, double Seconds, string Detail, IReadOnlyDictionary<string, bool> Flags, bool Error = false);
 
 /// <param name="EstimatedTokens">Sem a contagem do Ollama, os tokens são estimados por caracteres / 4.</param>
 public sealed record SpeedProbe(double FirstTokenSeconds, double TokensPerSecond, bool EstimatedTokens);
 
-public sealed record ModelEvalReport(string Model, IReadOnlyList<EvalCaseResult> Cases, SpeedProbe? Speed, string? Error)
+public sealed record ModelEvalReport(string Model, IReadOnlyList<EvalCaseResult> Cases, SpeedProbe? Speed, string? Error, string? SpeedError = null)
 {
     public IReadOnlyList<EvalCaseResult> For(string role) => Cases.Where(c => c.Role == role).ToList();
 
-    public double PassRate(string role) => For(role) is { Count: > 0 } list ? (double)list.Count(c => c.Passed) / list.Count : 0;
+    public int Errors => Cases.Count(c => c.Error);
+
+    /// <summary>Só os casos que o modelo respondeu de verdade entram na conta (os com erro do Ollama ficam de fora).</summary>
+    public double PassRate(string role)
+    {
+        var answered = For(role).Where(c => !c.Error).ToList();
+        return answered.Count == 0 ? 0 : (double)answered.Count(c => c.Passed) / answered.Count;
+    }
+
+    /// <summary>Sem erro do Ollama e com a velocidade medida: só então o resultado serve para decidir.</summary>
+    public bool Complete => Error is null && Errors == 0 && Speed is not null;
 
     /// <summary>Critérios do spike S4: personalizador com ≥ 80% de primeira, 1º token ≤ 3 s e ≥ 15 tokens/s.</summary>
-    public bool MeetsS4 => Error is null && Speed is { FirstTokenSeconds: <= 3, TokensPerSecond: >= 15 }
+    public bool MeetsS4 => Complete && Speed is { FirstTokenSeconds: <= 3, TokensPerSecond: >= 15 }
         && (For(PromptRoles.Personalizer).Count == 0 || PassRate(PromptRoles.Personalizer) >= 0.8);
+}
+
+/// <summary>
+/// Guarda o que os papéis registram no log, para o eval separar "o modelo errou" de "o Ollama falhou": aviso ou erro é
+/// falha de conexão; informação e depuração explicam por que uma resposta foi descartada.
+/// </summary>
+internal sealed class CapturedLog<T> : ILogger<T>
+{
+    private readonly List<string> _failures = [];
+    private readonly List<string> _notes = [];
+
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        var message = formatter(state, exception);
+        if (logLevel >= LogLevel.Warning) _failures.Add(exception is null ? message : $"{exception.GetType().Name}: {exception.Message}");
+        else _notes.Add(message);
+    }
+
+    /// <summary>A falha registrada desde a última chamada (e esquece), ou nulo.</summary>
+    public string? TakeFailure()
+    {
+        var failure = _failures.LastOrDefault();
+        _failures.Clear();
+        return failure;
+    }
+
+    /// <summary>As últimas explicações registradas desde a última chamada (e esquece), ou nulo.</summary>
+    public string? TakeNotes()
+    {
+        var notes = _notes.TakeLast(2).ToList();
+        _notes.Clear();
+        return notes.Count == 0 ? null : string.Join(" · ", notes);
+    }
 }
 
 /// <summary>
@@ -38,6 +87,8 @@ public sealed record ModelEvalReport(string Model, IReadOnlyList<EvalCaseResult>
 /// </summary>
 public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, TextWriter log)
 {
+    private static readonly CultureInfo PtBr = CultureInfo.GetCultureInfo("pt-BR");
+
     public static readonly string[] AllRoles = [PromptRoles.Personalizer, PromptRoles.Interviewer, PromptRoles.Narrator, PromptRoles.Mapper];
 
     private static readonly string[] Admissions =
@@ -54,21 +105,74 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
     public async Task<ModelEvalReport> RunAsync(AiRuntime runtime, IReadOnlyList<string> roles, int? limit, CancellationToken cancellationToken)
     {
         var model = runtime.Options.Ollama.Model;
-        var status = await runtime.StatusAsync(cancellationToken);
+
+        // Fixa o status: uma checagem lenta no meio da rodada derrubaria a IA e estragaria as medidas.
+        var status = await runtime.PinAsync(cancellationToken);
         if (status.Mode != AiMode.Ollama) return new ModelEvalReport(model, [], null, status.Detail);
 
+        await WarmUpAsync(runtime, cancellationToken);
         var results = new List<EvalCaseResult>();
-        if (roles.Contains(PromptRoles.Personalizer)) results.AddRange(await PersonalizerAsync(runtime, limit, cancellationToken));
-        if (roles.Contains(PromptRoles.Interviewer)) results.AddRange(await InterviewerAsync(runtime, limit, cancellationToken));
-        if (roles.Contains(PromptRoles.Narrator)) results.AddRange(await NarratorAsync(runtime, limit, cancellationToken));
-        if (roles.Contains(PromptRoles.Mapper)) results.AddRange(await MapperAsync(runtime, limit, cancellationToken));
-        var speed = await SpeedAsync(runtime, cancellationToken);
-        return new ModelEvalReport(model, results, speed, null);
+        if (roles.Contains(PromptRoles.Personalizer))
+        {
+            log.WriteLine("  Personalizador…");
+            results.AddRange(await PersonalizerAsync(runtime, limit, cancellationToken));
+        }
+
+        if (roles.Contains(PromptRoles.Interviewer))
+        {
+            log.WriteLine("  Entrevistador…");
+            results.AddRange(await InterviewerAsync(runtime, limit, cancellationToken));
+        }
+
+        if (roles.Contains(PromptRoles.Narrator))
+        {
+            log.WriteLine("  Narrador…");
+            results.AddRange(await NarratorAsync(runtime, limit, cancellationToken));
+        }
+
+        if (roles.Contains(PromptRoles.Mapper))
+        {
+            log.WriteLine("  Mapeador…");
+            results.AddRange(await MapperAsync(runtime, limit, cancellationToken));
+        }
+
+        log.WriteLine("  Velocidade…");
+        var (speed, speedError) = await SpeedAsync(runtime, cancellationToken);
+        return new ModelEvalReport(model, results, speed, null, speedError);
     }
+
+    /// <summary>Carrega o modelo na memória antes de medir: o primeiro caso não pode carregar a conta do carregamento (10 a 30 s).</summary>
+    private async Task WarmUpAsync(AiRuntime runtime, CancellationToken cancellationToken)
+    {
+        var client = await runtime.ClientAsync(cancellationToken);
+        if (client is null) return;
+        log.WriteLine("  Carregando o modelo na memória…");
+        try
+        {
+            using var deadline = runtime.Deadline(cancellationToken);
+            await client.GetResponseAsync([new ChatMessage(ChatRole.User, "Responda apenas: ok")], runtime.ChatOptions(0f, 1), deadline.Token);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // o primeiro caso mostra o erro de verdade
+        }
+    }
+
+    /// <summary>Uma linha por caso, para quem espera os 10 minutos de uma rodada saber que está andando.</summary>
+    private EvalCaseResult Done(EvalCaseResult result)
+    {
+        var mark = result.Error ? "ERRO  " : result.Passed ? "ok    " : "falhou";
+        log.WriteLine($"    {mark} {result.Seconds.ToString("0.0", PtBr),6} s  {AiText.Clean(result.Case, 70)}");
+        return result;
+    }
+
+    private static EvalCaseResult ErrorCase(string role, string? name, double seconds, string failure) =>
+        new(role, name ?? "", false, Math.Round(seconds, 2), $"erro ao falar com o Ollama: {AiText.Clean(failure, 200)}", new Dictionary<string, bool>(), Error: true);
 
     private async Task<List<EvalCaseResult>> PersonalizerAsync(AiRuntime runtime, int? limit, CancellationToken cancellationToken)
     {
-        var personalizer = new ChallengePersonalizer(runtime, prompts, NullLogger<ChallengePersonalizer>.Instance);
+        var logger = new CapturedLog<ChallengePersonalizer>();
+        var personalizer = new ChallengePersonalizer(runtime, prompts, logger);
         var results = new List<EvalCaseResult>();
         foreach (var c in Cases("personalizador", limit))
         {
@@ -79,12 +183,21 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
             var watch = Stopwatch.StartNew();
             var result = await personalizer.PersonalizeAsync(new PersonalizationRequest(context ?? "", difficulty.ToString().ToLowerInvariant(), candidates), cancellationToken);
             var seconds = watch.Elapsed.TotalSeconds;
-            if (result is null)
+            if (logger.TakeFailure() is { } failure)
             {
-                results.Add(Case(PromptRoles.Personalizer, context, false, seconds, "o modelo não devolveu um delta válido",
-                    new() { ["delta-valido"] = false, ["monta"] = false, ["aderente"] = false }));
+                results.Add(Done(ErrorCase(PromptRoles.Personalizer, context, seconds, failure)));
                 continue;
             }
+
+            if (result is null)
+            {
+                var said = logger.TakeNotes();
+                results.Add(Done(Case(PromptRoles.Personalizer, context, false, seconds, $"o modelo não devolveu um delta válido{(said is null ? "" : $": {said}")}",
+                    new() { ["delta-valido"] = false, ["monta"] = false, ["aderente"] = false })));
+                continue;
+            }
+
+            logger.TakeNotes();
 
             var seed = content.FindSeed(result.Delta.SeedId)!;
             string? error = null;
@@ -106,9 +219,10 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
             }
 
             var adherent = tracks.Contains(seed.Track);
-            var detail = $"{seed.Id}{(error is null ? "" : $"; não monta: {error}")}; ajustes da validação: {result.Adjustments.Count}; narrativa {(result.Delta.Narrative is null ? "descartada" : "ok")}";
-            results.Add(Case(PromptRoles.Personalizer, context, error is null && adherent, seconds, detail,
-                new() { ["delta-valido"] = true, ["monta"] = error is null, ["aderente"] = adherent }));
+            var adjustments = result.Adjustments.Count == 0 ? "" : $"; ajustes da validação: {string.Join(" | ", result.Adjustments.Take(3))}";
+            var detail = $"{seed.Id}{(error is null ? "" : $"; não monta: {error}")}{adjustments}; narrativa {(result.Delta.Narrative is null ? "descartada" : "ok")}";
+            results.Add(Done(Case(PromptRoles.Personalizer, context, error is null && adherent, seconds, detail,
+                new() { ["delta-valido"] = true, ["monta"] = error is null, ["aderente"] = adherent })));
         }
 
         return results;
@@ -116,7 +230,8 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
 
     private async Task<List<EvalCaseResult>> InterviewerAsync(AiRuntime runtime, int? limit, CancellationToken cancellationToken)
     {
-        var interviewer = new Interviewer(runtime, prompts, NullLogger<Interviewer>.Instance);
+        var logger = new CapturedLog<Interviewer>();
+        var interviewer = new Interviewer(runtime, prompts, logger);
         var results = new List<EvalCaseResult>();
         foreach (var c in Cases("entrevistador", limit))
         {
@@ -128,9 +243,15 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
             var watch = Stopwatch.StartNew();
             var answer = await interviewer.AnswerAsync(new InterviewRequest(context, [], question), null, cancellationToken);
             var seconds = watch.Elapsed.TotalSeconds;
+            if (logger.TakeFailure() is { } failure)
+            {
+                results.Add(Done(ErrorCase(PromptRoles.Interviewer, $"{seedId}: {question}", seconds, failure)));
+                continue;
+            }
+
             if (answer.Source != AnswerSource.Ai)
             {
-                results.Add(Case(PromptRoles.Interviewer, $"{seedId}: {question}", false, seconds, "o modelo não respondeu (caiu para a resposta curada)", new()));
+                results.Add(Done(Case(PromptRoles.Interviewer, $"{seedId}: {question}", false, seconds, "o modelo respondeu vazio (caiu para a resposta curada)", new())));
                 continue;
             }
 
@@ -145,8 +266,8 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
                     : (true, "não revelou referência nem cenários ocultos"),
                 _ => (Admissions.Any(a => normalized.Contains(a, StringComparison.Ordinal)), "esperava admitir que o enunciado não define"),
             };
-            results.Add(Case(PromptRoles.Interviewer, $"{seedId}: {question}", passed, seconds, $"{detail} · \"{AiText.Clean(answer.Text, 140)}\"",
-                new() { [expect] = passed }));
+            results.Add(Done(Case(PromptRoles.Interviewer, $"{seedId}: {question}", passed, seconds, $"{detail} · \"{AiText.Clean(answer.Text, 140)}\"",
+                new() { [expect] = passed })));
         }
 
         return results;
@@ -154,7 +275,8 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
 
     private async Task<List<EvalCaseResult>> NarratorAsync(AiRuntime runtime, int? limit, CancellationToken cancellationToken)
     {
-        var narrator = new ReviewNarrator(runtime, prompts, NullLogger<ReviewNarrator>.Instance);
+        var logger = new CapturedLog<ReviewNarrator>();
+        var narrator = new ReviewNarrator(runtime, prompts, logger);
         var results = new List<EvalCaseResult>();
         foreach (var c in Cases("narrador", limit))
         {
@@ -168,17 +290,20 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
-                results.Add(Case(PromptRoles.Narrator, seedId, false, watch.Elapsed.TotalSeconds, $"falha do modelo: {ex.Message}", new()));
+                logger.TakeNotes();
+                results.Add(Done(ErrorCase(PromptRoles.Narrator, seedId, watch.Elapsed.TotalSeconds, ex.Message)));
                 continue;
             }
 
             var seconds = watch.Elapsed.TotalSeconds;
+            var why = logger.TakeNotes();
+            logger.TakeFailure();
             var top = result.Review.Improvements.FirstOrDefault()?.Title ?? "";
             var text = narrative is null ? "" : AiText.Normalize(string.Join(' ', narrative.Paragraphs));
             var mentionsTop = top.Length > 0 && AiText.Normalize(top).Split(' ').Where(w => w.Length >= 5).Any(w => text.Contains(w, StringComparison.Ordinal));
-            results.Add(Case(PromptRoles.Narrator, $"{seedId} (nota {result.Score.FinalScore})", narrative is not null, seconds,
-                narrative is null ? "narrativa descartada: citou números fora da revisão duas vezes" : $"cita o ponto de maior impacto: {(mentionsTop ? "sim" : "não")} ({top})",
-                new() { ["aceita"] = narrative is not null, ["cita-o-principal"] = mentionsTop }));
+            results.Add(Done(Case(PromptRoles.Narrator, $"{seedId} (nota {result.Score.FinalScore})", narrative is not null, seconds,
+                narrative is null ? $"narrativa descartada depois de duas tentativas{(why is null ? "" : $": {why}")}" : $"cita o ponto de maior impacto: {(mentionsTop ? "sim" : "não")} ({top})",
+                new() { ["aceita"] = narrative is not null, ["cita-o-principal"] = mentionsTop })));
         }
 
         return results;
@@ -186,7 +311,8 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
 
     private async Task<List<EvalCaseResult>> MapperAsync(AiRuntime runtime, int? limit, CancellationToken cancellationToken)
     {
-        var mapper = new LabelMapper(runtime, prompts, NullLogger<LabelMapper>.Instance);
+        var logger = new CapturedLog<LabelMapper>();
+        var mapper = new LabelMapper(runtime, prompts, logger);
         var dataset = Dataset("mapeador");
         var provider = CloudProviders.Parse(Str(dataset["provider"]) ?? "aws");
         var palette = content.Catalog.ForProvider(provider)
@@ -200,19 +326,26 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
             var expected = Strings(c["expect"]);
             var watch = Stopwatch.StartNew();
             var suggestion = await mapper.SuggestAsync(new LabelMappingRequest(label, null, palette), cancellationToken);
+            var seconds = watch.Elapsed.TotalSeconds;
+            if (logger.TakeFailure() is { } failure)
+            {
+                results.Add(Done(ErrorCase(PromptRoles.Mapper, label, seconds, failure)));
+                continue;
+            }
+
             var answer = suggestion?.CatalogId ?? LabelMapper.None;
-            results.Add(Case(PromptRoles.Mapper, label, expected.Contains(answer), watch.Elapsed.TotalSeconds,
-                $"respondeu {answer}; aceitos: {string.Join(", ", expected)}", new() { ["certo"] = expected.Contains(answer) }));
+            results.Add(Done(Case(PromptRoles.Mapper, label, expected.Contains(answer), seconds,
+                $"respondeu {answer}; aceitos: {string.Join(", ", expected)}", new() { ["certo"] = expected.Contains(answer) })));
         }
 
         return results;
     }
 
     /// <summary>Primeiro token e tokens por segundo num pedido curto, em streaming (critérios de velocidade do S4).</summary>
-    private static async Task<SpeedProbe?> SpeedAsync(AiRuntime runtime, CancellationToken cancellationToken)
+    private static async Task<(SpeedProbe? Probe, string? Error)> SpeedAsync(AiRuntime runtime, CancellationToken cancellationToken)
     {
         var client = await runtime.ClientAsync(cancellationToken);
-        if (client is null) return null;
+        if (client is null) return (null, "o Ollama não ficou disponível");
         var watch = Stopwatch.StartNew();
         double? first = null;
         var text = new StringBuilder();
@@ -228,15 +361,15 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
                 foreach (var usage in update.Contents.OfType<UsageContent>()) tokens = usage.Details.OutputTokenCount ?? tokens;
             }
         }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
-            return null;
+            return (null, $"{ex.GetType().Name}: {AiText.Clean(ex.Message, 160)}");
         }
 
         var total = watch.Elapsed.TotalSeconds;
         var generation = Math.Max(0.001, total - (first ?? 0));
         var outputTokens = tokens ?? Math.Max(1, text.Length / 4);
-        return new SpeedProbe(Math.Round(first ?? total, 2), Math.Round(outputTokens / generation, 1), tokens is null);
+        return (new SpeedProbe(Math.Round(first ?? total, 2), Math.Round(outputTokens / generation, 1), tokens is null), null);
     }
 
     /// <summary>A revisão de uma referência degradada (uma instância por serviço, numa zona só): avaliada uma vez por semente.</summary>
@@ -331,45 +464,66 @@ public static class AiEvalReport
         {
             if (r.Error is not null)
             {
-                text.AppendLine(CultureInfo.InvariantCulture, $"| {r.Model} | {r.Error} | | | | | | ✗ |");
+                text.AppendLine(CultureInfo.InvariantCulture, $"| {r.Model} | {Escape(r.Error)} | | | | | | — |");
                 continue;
             }
 
             var cells = Roles.Select(role => Cell(r, role.Role));
-            var speed = r.Speed is { } s ? $"{s.FirstTokenSeconds.ToString("0.0", PtBr)} s | {s.TokensPerSecond.ToString("0.0", PtBr)}{(s.EstimatedTokens ? " (est.)" : "")}" : "— | —";
-            text.AppendLine(CultureInfo.InvariantCulture, $"| {r.Model} | {string.Join(" | ", cells)} | {speed} | {(r.MeetsS4 ? "✓" : "✗")} |");
+            var speed = r.Speed is { } s ? $"{s.FirstTokenSeconds.ToString("0.0", PtBr)} s | {s.TokensPerSecond.ToString("0.0", PtBr)}{(s.EstimatedTokens ? " (est.)" : "")}" : "erro | erro";
+            var mark = !r.Complete ? "?" : r.MeetsS4 ? "✓" : "✗";
+            text.AppendLine(CultureInfo.InvariantCulture, $"| {r.Model} | {string.Join(" | ", cells)} | {speed} | {mark} |");
         }
 
         text.AppendLine();
-        text.AppendLine("Critérios do S4: personalizador aprovado de primeira em 80% dos contextos ou mais, primeiro token em até 3 s e 15 tokens/s ou mais.");
-        var best = reports.Where(r => r.MeetsS4).OrderByDescending(r => r.Cases.Count(c => c.Passed)).FirstOrDefault();
-        text.AppendLine(best is null
-            ? "Nenhum modelo passou nos critérios: o app continua funcionando sem IA (modo none)."
-            : $"Sugestão de modelo padrão: **{best.Model}** (use em `Ai:Ollama:Model`).");
+        text.AppendLine("Critérios do S4: personalizador aprovado de primeira em 80% dos contextos ou mais, primeiro token em até 3 s e 15 tokens/s ou mais. Tempos: mediana por caso, com o modelo já carregado na memória.");
+        var incomplete = reports.Where(r => r.Error is null && !r.Complete).ToList();
+        if (incomplete.Count > 0)
+        {
+            text.AppendLine();
+            text.AppendLine(CultureInfo.InvariantCulture,
+                $"**Dados incompletos (?)** em {string.Join(", ", incomplete.Select(r => r.Model))}: há casos com erro ao falar com o Ollama ou a velocidade não foi medida. Os casos com erro ficam fora das porcentagens. Rode de novo antes de decidir.");
+        }
+
+        var complete = reports.Where(r => r.Complete).ToList();
+        if (complete.Count > 0)
+        {
+            var best = complete.Where(r => r.MeetsS4).OrderByDescending(r => r.Cases.Count(c => c.Passed)).FirstOrDefault();
+            text.AppendLine();
+            text.AppendLine(best is null
+                ? "Nenhum modelo com dados completos passou nos critérios: o app continua funcionando sem IA (modo none)."
+                : $"Sugestão de modelo padrão: **{best.Model}** (use em `Ai:Ollama:Model`).");
+        }
 
         foreach (var r in reports.Where(r => r.Error is null))
         {
             text.AppendLine();
             text.AppendLine(CultureInfo.InvariantCulture, $"## {r.Model}");
+            if (r.SpeedError is not null)
+            {
+                text.AppendLine();
+                text.AppendLine(CultureInfo.InvariantCulture, $"Velocidade não medida: {Escape(r.SpeedError)}");
+            }
+
             foreach (var (role, title) in Roles)
             {
                 var cases = r.For(role);
                 if (cases.Count == 0) continue;
                 text.AppendLine();
                 text.AppendLine(CultureInfo.InvariantCulture, $"### {title}");
-                var flags = cases.SelectMany(c => c.Flags.Keys).Distinct(StringComparer.Ordinal).ToList();
+                var answered = cases.Where(c => !c.Error).ToList();
+                var flags = answered.SelectMany(c => c.Flags.Keys).Distinct(StringComparer.Ordinal).ToList();
                 if (flags.Count > 1)
                 {
                     text.AppendLine();
                     text.AppendLine(string.Join(" · ", flags.Select(f =>
-                        $"{f}: {cases.Count(c => c.Flags.TryGetValue(f, out var ok) && ok)}/{cases.Count(c => c.Flags.ContainsKey(f))}")));
+                        $"{f}: {answered.Count(c => c.Flags.TryGetValue(f, out var ok) && ok)}/{answered.Count(c => c.Flags.ContainsKey(f))}")));
                 }
 
                 text.AppendLine();
                 text.AppendLine("| Caso | Resultado | Tempo | Detalhe |");
                 text.AppendLine("|---|---|---|---|");
                 foreach (var c in cases)
-                    text.AppendLine(CultureInfo.InvariantCulture, $"| {Escape(c.Case)} | {(c.Passed ? "✓" : "✗")} | {c.Seconds.ToString("0.0", PtBr)} s | {Escape(c.Detail)} |");
+                    text.AppendLine(CultureInfo.InvariantCulture, $"| {Escape(c.Case)} | {(c.Error ? "erro" : c.Passed ? "✓" : "✗")} | {c.Seconds.ToString("0.0", PtBr)} s | {Escape(c.Detail)} |");
             }
         }
 
@@ -380,9 +534,18 @@ public static class AiEvalReport
     {
         var cases = report.For(role);
         if (cases.Count == 0) return "—";
-        var passed = cases.Count(c => c.Passed);
-        var seconds = cases.Average(c => c.Seconds);
-        return $"{passed}/{cases.Count} ({(report.PassRate(role) * 100).ToString("0", PtBr)}%) · {seconds.ToString("0.0", PtBr)} s";
+        var answered = cases.Where(c => !c.Error).ToList();
+        var errors = cases.Count - answered.Count;
+        var summary = answered.Count == 0 ? "só erros" : $"{answered.Count(c => c.Passed)}/{answered.Count} ({(report.PassRate(role) * 100).ToString("0", PtBr)}%) · {Median(answered.Select(c => c.Seconds)).ToString("0.0", PtBr)} s";
+        return errors > 0 ? $"{summary} · {errors} com erro" : summary;
+    }
+
+    private static double Median(IEnumerable<double> values)
+    {
+        var sorted = values.Order().ToList();
+        if (sorted.Count == 0) return 0;
+        var middle = sorted.Count / 2;
+        return sorted.Count % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
     }
 
     private static string Escape(string text) => text.Replace("|", "\\|", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal);
@@ -406,7 +569,7 @@ public static class AiEvalCommand
     {
         var content = ContentRepository.Load(contentRoot);
         var prompts = PromptLibrary.Load(Path.Combine(content.Root, "prompts"));
-        var endpoint = args.Option("endpoint") ?? "http://localhost:11434";
+        var endpoint = args.Option("endpoint") ?? new OllamaOptions().Endpoint;
         var models = Models(args);
         var roles = (args.Option("roles") ?? string.Join(',', AiEvalRunner.AllRoles)).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var unknown = roles.Where(r => !AiEvalRunner.AllRoles.Contains(r)).ToList();
@@ -423,10 +586,11 @@ public static class AiEvalCommand
             using var runtime = new AiRuntime(new AiOptions
             {
                 Mode = "ollama",
-                Ollama = new OllamaOptions { Endpoint = endpoint, Model = model, TimeoutSeconds = 300 },
+                Ollama = new OllamaOptions { Endpoint = endpoint, Model = model, TimeoutSeconds = 300, ProbeTimeoutMs = 30_000 },
             }, http, TimeProvider.System);
             var report = await runner.RunAsync(runtime, roles, limit, CancellationToken.None);
-            output.WriteLine(report.Error ?? $"  {report.Cases.Count(c => c.Passed)}/{report.Cases.Count} casos aprovados.");
+            output.WriteLine(report.Error ?? $"  {report.Cases.Count(c => c.Passed)}/{report.Cases.Count(c => !c.Error)} casos aprovados"
+                + (report.Errors > 0 ? $", {report.Errors} com erro ao falar com o Ollama (rode de novo)." : "."));
             reports.Add(report);
         }
 

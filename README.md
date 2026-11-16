@@ -76,8 +76,9 @@ Configuração (`src/Lab.App/appsettings.json` ou variáveis de ambiente):
 |---|---|---|
 | `Ai:Mode` | `auto` (`none` desliga, `ollama` exige) | `Ai__Mode=none` |
 | `Ai:Ollama:Model` | `qwen2.5:3b` | `Ai__Ollama__Model=gemma3:4b` |
-| `Ai:Ollama:Endpoint` | `http://localhost:11434` | `Ai__Ollama__Endpoint=http://127.0.0.1:11434` |
+| `Ai:Ollama:Endpoint` | `http://127.0.0.1:11434` (IPv4: no Windows, `localhost` tenta o IPv6 primeiro e perde segundos) | `Ai__Ollama__Endpoint=http://127.0.0.1:11434` |
 | `Ai:Ollama:ContextTokens` / `TimeoutSeconds` | `8192` / `120` | `Ai__Ollama__TimeoutSeconds=60` |
+| `Ai:Ollama:ProbeTimeoutMs` | `4000` (quanto esperar o Ollama responder à checagem de disponibilidade) | `Ai__Ollama__ProbeTimeoutMs=8000` |
 
 Os prompts são versionados em `content/prompts/<papel>/v<n>.md` e a versão usada fica gravada junto com o desafio ou a
 narrativa.
@@ -95,9 +96,15 @@ No Linux, macOS ou Git Bash:
 ./lab.sh ai eval --models qwen2.5:3b,gemma3:4b
 ```
 
-O relatório (em `exports/evals/`) mostra, por modelo, deltas válidos e aderentes ao contexto, respostas certas e sem
-vazamento do entrevistador, narrativas aceitas, mapeamentos certos, tempo até o primeiro token e tokens por segundo,
-e sugere o padrão pelos critérios do S4 (personalizador ≥ 80% de primeira, primeiro token ≤ 3 s, ≥ 15 tokens/s).
+O comando carrega o modelo na memória antes de medir, mostra uma linha por caso e leva alguns minutos por modelo. O
+relatório (em `exports/evals/`) mostra, por modelo, deltas válidos e aderentes ao contexto, respostas certas e sem
+vazamento do entrevistador, narrativas aceitas, mapeamentos certos, tempo mediano por caso, tempo até o primeiro token
+e tokens por segundo, e sugere o padrão pelos critérios do S4 (personalizador ≥ 80% de primeira, primeiro token ≤ 3 s,
+≥ 15 tokens/s).
+
+Falha ao falar com o Ollama (conexão, tempo esgotado) aparece como **erro** e fica fora das porcentagens; modelos com
+erro ou sem a velocidade medida ganham `?` no S4 e o relatório pede para rodar de novo. Resposta errada do modelo é
+reprovação (✗), nunca erro.
 
 ## Desenvolvimento
 

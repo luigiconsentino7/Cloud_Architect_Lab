@@ -32,10 +32,13 @@ function narrate(user) {
   };
 }
 
-export function startFakeOllama({ port = 11999, model = 'qwen2.5:3b', chunkDelayMs = 25 } = {}) {
+export function startFakeOllama({ port = 11999, model = 'qwen2.5:3b', chunkDelayMs = 25, slowTagsMs = Number(process.env.FAKE_OLLAMA_SLOW_TAGS_MS ?? 0) } = {}) {
   const requests = [];
   const server = createServer(async (req, res) => {
+    if (process.env.FAKE_OLLAMA_LOG) console.log(`${req.method} ${req.url}`);
     if (req.method === 'GET' && req.url === '/api/tags') {
+      // Simula o /api/tags lento de um Ollama frio (disco, antivírus): a checagem do app não pode desistir cedo.
+      if (slowTagsMs > 0) await new Promise((r) => setTimeout(r, slowTagsMs));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ models: [{ name: model, model, modified_at: new Date().toISOString(), size: 1, digest: 'fake' }] }));
       return;

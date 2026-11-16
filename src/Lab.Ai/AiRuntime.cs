@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using OllamaSharp;
@@ -16,7 +17,8 @@ public sealed class AiOptions
 
 public sealed class OllamaOptions
 {
-    public string Endpoint { get; set; } = "http://localhost:11434";
+    /// <summary>127.0.0.1 e não "localhost": o Ollama escuta em IPv4 e, no Windows, "localhost" tenta o IPv6 primeiro (perde segundos).</summary>
+    public string Endpoint { get; set; } = "http://127.0.0.1:11434";
 
     /// <summary>Modelo de 3–4B que cabe inteiro em 4 GB de VRAM (spec 06); trocável a qualquer momento.</summary>
     public string Model { get; set; } = "qwen2.5:3b";
@@ -26,18 +28,31 @@ public sealed class OllamaOptions
 
     /// <summary>Tempo máximo de uma resposta; depois disso o app segue sem IA.</summary>
     public int TimeoutSeconds { get; set; } = 120;
+
+    /// <summary>Quanto esperar o Ollama responder à checagem de disponibilidade (a primeira conexão pode demorar).</summary>
+    public int ProbeTimeoutMs { get; set; } = 4000;
 }
 
 /// <summary>
-/// Decide o modo efetivo e entrega o cliente do Ollama. A disponibilidade é checada com timeout curto e guardada por
-/// 30 s, para o app nunca travar esperando um Ollama que não está rodando.
+/// Decide o modo efetivo e entrega o cliente do Ollama. A checagem de disponibilidade nunca trava o app, mas também
+/// não derruba a IA por um engasgo: espera um tempo razoável, repete quando só demorou, mantém a IA ligada se o Ollama
+/// estava bom e demorou a responder, e só lembra de uma falha por poucos segundos (para notar que o Ollama abriu).
 /// </summary>
 public sealed class AiRuntime(AiOptions options, HttpClient http, TimeProvider clock) : IDisposable
 {
-    private static readonly TimeSpan CacheFor = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan PositiveFor = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan NegativeFor = TimeSpan.FromSeconds(5);
+
+    /// <summary>Se o Ollama estava bom e só demorou a responder à checagem, a IA continua ligada por até este tempo.</summary>
+    private static readonly TimeSpan GraceFor = TimeSpan.FromMinutes(2);
+
     private readonly SemaphoreSlim _lock = new(1, 1);
     private AiStatus? _cached;
     private DateTimeOffset _checkedAt;
+    private TimeSpan _validFor;
+    private AiStatus? _lastGood;
+    private DateTimeOffset _lastGoodAt;
+    private bool _pinned;
     private OllamaApiClient? _ollama;
 
     /// <summary>Substitui o cliente do Ollama (os testes injetam um cliente falso e o modo fica "ollama").</summary>
@@ -55,6 +70,7 @@ public sealed class AiRuntime(AiOptions options, HttpClient http, TimeProvider c
             var status = await ProbeAsync(cancellationToken);
             _cached = status;
             _checkedAt = clock.GetUtcNow();
+            _validFor = status.Mode == AiMode.Ollama ? PositiveFor : NegativeFor;
             return status;
         }
         finally
@@ -64,7 +80,23 @@ public sealed class AiRuntime(AiOptions options, HttpClient http, TimeProvider c
     }
 
     /// <summary>Esquece o status (ex.: o Ollama caiu no meio de uma resposta); a próxima chamada checa de novo.</summary>
-    public void Invalidate() => _cached = null;
+    public void Invalidate()
+    {
+        if (!_pinned) _cached = null;
+    }
+
+    /// <summary>
+    /// Checa agora e, se o Ollama estiver pronto, fixa o status: não rechecar mais. Usado nos evals, onde uma checagem
+    /// lenta no meio da rodada derrubaria a IA e estragaria as medidas.
+    /// </summary>
+    public async Task<AiStatus> PinAsync(CancellationToken cancellationToken = default)
+    {
+        _pinned = false;
+        _cached = null;
+        var status = await StatusAsync(cancellationToken);
+        _pinned = status.Mode == AiMode.Ollama;
+        return status;
+    }
 
     /// <summary>O cliente do modelo, ou nulo no modo sem IA.</summary>
     public async Task<IChatClient?> ClientAsync(CancellationToken cancellationToken = default)
@@ -100,7 +132,7 @@ public sealed class AiRuntime(AiOptions options, HttpClient http, TimeProvider c
     private bool Fresh(out AiStatus status)
     {
         status = _cached!;
-        return _cached is not null && clock.GetUtcNow() - _checkedAt < CacheFor;
+        return _cached is not null && (_pinned || clock.GetUtcNow() - _checkedAt < _validFor);
     }
 
     private async Task<AiStatus> ProbeAsync(CancellationToken cancellationToken)
@@ -113,28 +145,64 @@ public sealed class AiRuntime(AiOptions options, HttpClient http, TimeProvider c
         if (ClientFactory is not null)
             return new AiStatus(AiMode.Ollama, configured, true, model, endpoint, [model], $"IA local com {model}.");
 
-        IReadOnlyList<string> installed;
-        try
+        var (installed, failure) = await FetchTagsAsync(cancellationToken);
+        if (failure is not null)
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromMilliseconds(1500));
-            var tags = await http.GetFromJsonAsync<OllamaTags>(new Uri(new Uri(endpoint), "/api/tags"), timeout.Token);
-            installed = tags?.Models?.Select(m => m.Name).Order(StringComparer.Ordinal).ToList() ?? [];
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or UriFormatException)
-        {
-            return new AiStatus(AiMode.None, configured, false, null, endpoint, [],
-                $"O Ollama não respondeu em {endpoint}: o app segue sem IA (busca guiada e respostas curadas).");
+            // O Ollama estava bom e só demorou a responder (disco, antivírus, GPU ocupada): não derruba a IA por isso.
+            if (failure.Transient && _lastGood is not null && clock.GetUtcNow() - _lastGoodAt < GraceFor) return _lastGood;
+            return new AiStatus(AiMode.None, configured, false, null, endpoint, [], failure.Describe(endpoint));
         }
 
-        var hasModel = installed.Any(m => m == model || m == $"{model}:latest");
+        var hasModel = installed!.Any(m => m == model || m == $"{model}:latest");
         if (!hasModel)
         {
-            return new AiStatus(AiMode.None, configured, true, null, endpoint, installed,
+            return new AiStatus(AiMode.None, configured, true, null, endpoint, installed!,
                 $"O Ollama está rodando, mas o modelo {model} não está instalado (rode: ollama pull {model}).");
         }
 
-        return new AiStatus(AiMode.Ollama, configured, true, model, endpoint, installed, $"IA local com {model} no Ollama: nada sai da sua máquina.");
+        var ready = new AiStatus(AiMode.Ollama, configured, true, model, endpoint, installed!, $"IA local com {model} no Ollama: nada sai da sua máquina.");
+        _lastGood = ready;
+        _lastGoodAt = clock.GetUtcNow();
+        return ready;
+    }
+
+    /// <summary>Lista os modelos do Ollama. Só repete quando a resposta demorou (conexão recusada não melhora com retentativa).</summary>
+    private async Task<(IReadOnlyList<string>? Installed, ProbeFailure? Failure)> FetchTagsAsync(CancellationToken cancellationToken)
+    {
+        var uri = new Uri(new Uri(options.Ollama.Endpoint), "/api/tags");
+        var timeout = TimeSpan.FromMilliseconds(Math.Clamp(options.Ollama.ProbeTimeoutMs, 100, 120_000));
+        ProbeFailure? failure = null;
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            limit.CancelAfter(timeout);
+            try
+            {
+                var tags = await http.GetFromJsonAsync<OllamaTags>(uri, limit.Token);
+                return (tags?.Models?.Select(m => m.Name).Order(StringComparer.Ordinal).ToList() ?? [], null);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                failure = new ProbeFailure(true, $"esperei {timeout.TotalSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} s");
+            }
+            catch (HttpRequestException ex)
+            {
+                return (null, new ProbeFailure(false, ex.Message));
+            }
+            catch (Exception ex) when (ex is JsonException or UriFormatException)
+            {
+                return (null, new ProbeFailure(false, ex.Message));
+            }
+        }
+
+        return (null, failure);
+    }
+
+    private sealed record ProbeFailure(bool Transient, string Message)
+    {
+        public string Describe(string endpoint) => Transient
+            ? $"O Ollama em {endpoint} não respondeu a tempo ({Message}): o app segue sem IA (busca guiada e respostas curadas) e tenta de novo em instantes."
+            : $"Não consegui conectar ao Ollama em {endpoint} ({Message}): o app segue sem IA (busca guiada e respostas curadas). Abra o Ollama para ligar a IA local.";
     }
 
     private sealed record OllamaTags([property: JsonPropertyName("models")] IReadOnlyList<OllamaModel>? Models);
