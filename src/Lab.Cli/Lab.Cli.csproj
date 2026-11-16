@@ -6,5 +6,6 @@
   <ItemGroup>
     <ProjectReference Include="../Lab.Content/Lab.Content.csproj" />
     <ProjectReference Include="../Engine/Lab.Pipeline/Lab.Pipeline.csproj" />
+    <ProjectReference Include="../Lab.Ai/Lab.Ai.csproj" />
   </ItemGroup>
 </Project>

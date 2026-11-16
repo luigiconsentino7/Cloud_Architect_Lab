@@ -16,11 +16,13 @@ const string Usage = """
       lab rules validate
       lab catalog validate
       lab evaluate <semente> [--reference | --scene cena.json] [--provider aws] [--difficulty senior] [--out exports/]
+      lab ai eval [--models qwen2.5:3b,gemma3:4b] [--endpoint http://localhost:11434] [--roles personalizador,entrevistador,narrador,mapeador] [--limit n] [--out exports/evals]
 
     Opções gerais:
       --content <pasta>   pasta content/ (padrão: procurada a partir do diretório atual)
 
     --quick valida só a variação padrão, em AWS, sem pegadinhas e com janelas de simulação comprimidas.
+    ai eval roda os datasets de content/evals contra modelos do Ollama e compara qualidade e velocidade (spike S4).
     """;
 
 try
@@ -44,6 +46,7 @@ try
         ("rules", "validate") => ContentCommands.ValidateRules(contentRoot),
         ("catalog", "validate") => ContentCommands.ValidateCatalog(contentRoot),
         ("evaluate", _) => EvaluateCommand.Run(contentRoot, parsed),
+        ("ai", "eval") => AiEvalCommand.RunAsync(contentRoot, parsed, Console.Out).GetAwaiter().GetResult(),
         _ => throw new UsageException($"Comando desconhecido: {string.Join(' ', args.Take(2))}."),
     };
 }

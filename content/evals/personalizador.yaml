@@ -1,0 +1,38 @@
+# Spike S4 — personalizador: contexto → semente + delta. "tracks" são as trilhas aceitas para a semente escolhida.
+cases:
+  - context: Trabalho num banco digital e o envio de Pix fica lento todo quinto dia útil, quando cai o salário.
+    difficulty: senior
+    tracks: [pix]
+  - context: Quero treinar a consulta de chaves Pix sem estourar o limite de consultas do DICT.
+    difficulty: pleno
+    tracks: [pix]
+  - context: Sou de uma fintech pequena e precisamos creditar os Pix recebidos sem duplicar o saldo do cliente.
+    difficulty: pleno
+    tracks: [pix, ledger]
+  - context: No meu trabalho o razão contábil precisa fechar em partidas dobradas, sem diferença de centavos.
+    difficulty: senior
+    tracks: [ledger]
+  - context: O extrato do app demora a mostrar os lançamentos novos e os clientes reclamam no SAC.
+    difficulty: senior
+    tracks: [ledger]
+  - context: Trabalho no autorizador de cartões de um emissor e o antifraude às vezes não responde a tempo.
+    difficulty: senior
+    tracks: [cartoes, risco]
+  - context: Somos uma corretora e precisamos distribuir cotações em tempo real para o home broker.
+    difficulty: senior
+    tracks: [capitais]
+  - context: Quero praticar o envio de ordens para a bolsa sem mandar a mesma ordem duas vezes.
+    difficulty: staff
+    tracks: [capitais]
+  - context: Estou implementando o fluxo de consentimento do Open Finance no banco onde trabalho.
+    difficulty: senior
+    tracks: [openfinance]
+  - context: A área de risco quer calcular um score de crédito em tempo real na hora da compra.
+    difficulty: senior
+    tracks: [risco, cartoes]
+  - context: Trabalho numa plataforma de investimentos e os aportes programados falham no dia 5 de cada mês.
+    difficulty: senior
+    tracks: [investimentos]
+  - context: Os clientes querem ver a posição consolidada de todos os investimentos num lugar só.
+    difficulty: senior
+    tracks: [investimentos]

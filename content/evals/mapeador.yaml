@@ -1,0 +1,19 @@
+# Spike S4 — mapeador de formas sem tipo (AWS). "expect": ids aceitos, ou "nenhum" para anotações.
+provider: aws
+cases:
+  - label: barramento de eventos de negócio
+    expect: [aws.eventbridge, aws.sns, aws.msk, aws.kinesis]
+  - label: guardar os comprovantes em PDF
+    expect: [aws.s3]
+  - label: motor de regras antifraude
+    expect: [aws.lambda, aws.ecs-fargate, aws.eks]
+  - label: login dos clientes
+    expect: [aws.cognito]
+  - label: orquestração da abertura de conta
+    expect: [aws.stepfunctions]
+  - label: painel de métricas e alarmes
+    expect: [aws.cloudwatch]
+  - label: lembrar de revisar o timeout depois
+    expect: [nenhum]
+  - label: time de plataforma
+    expect: [nenhum]

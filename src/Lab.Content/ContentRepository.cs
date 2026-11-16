@@ -71,10 +71,14 @@ public static class ContentRepository
         return new RuleTextLibrary(texts);
     }
 
+    /// <summary>Só o que muda a avaliação entra no hash (prompts e datasets de evals não mudam a nota).</summary>
+    private static readonly string[] HashedFolders = ["catalog/", "challenges/", "rules/"];
+
     private static string HashDirectory(string root)
     {
         var files = Directory.GetFiles(root, "*.yaml", SearchOption.AllDirectories)
             .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
+            .Where(f => HashedFolders.Any(folder => f.StartsWith(folder, StringComparison.Ordinal)))
             .Order(StringComparer.Ordinal);
         var manifest = new JsonObject();
         foreach (var file in files)

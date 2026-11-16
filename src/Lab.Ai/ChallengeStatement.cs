@@ -3,15 +3,36 @@ using System.Text;
 using Lab.Ir;
 using Lab.Ir.Challenges;
 
-namespace Lab.Modules.Challenges;
+namespace Lab.Ai;
 
-/// <summary>A parte pública do desafio em texto corrido (pt-BR), como o entrevistador a recebe.</summary>
+/// <summary>
+/// A parte pública do desafio em texto corrido (pt-BR), como o entrevistador a recebe: só os cenários e SLOs públicos,
+/// sem a referência e com a contagem (não os nomes) dos cenários ocultos.
+/// </summary>
 public static class ChallengeStatement
 {
     private static readonly CultureInfo PtBr = CultureInfo.GetCultureInfo("pt-BR");
 
-    public static string Write(ChallengePublicView view)
+    public static string Write(ChallengeSpec spec)
     {
+        var publicScenarios = spec.TestPlan.Scenarios.Where(s => s.Visibility == Visibility.Public).ToList();
+        var publicIds = publicScenarios.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        var view = new
+        {
+            spec.Summary,
+            spec.Narrative,
+            spec.Provider,
+            spec.Region,
+            spec.Difficulty,
+            spec.Mode,
+            spec.UseCases,
+            spec.ExternalSystems,
+            spec.Workload,
+            Slos = spec.TestPlan.Slos.Where(s => s.Scenarios.Any(publicIds.Contains)).ToList(),
+            Scenarios = publicScenarios,
+            HiddenScenarios = spec.TestPlan.Scenarios.Count - publicScenarios.Count,
+            spec.Constraints,
+        };
         var text = new StringBuilder();
         Line(text, $"Resumo: {view.Summary}");
         Line(text, $"Enunciado: {view.Narrative}");

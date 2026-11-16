@@ -17,5 +17,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Lab.Content/Lab.Content.csproj" />
     <ProjectReference Include="../../src/Engine/Lab.Pipeline/Lab.Pipeline.csproj" />
+    <ProjectReference Include="../../src/Lab.Cli/Lab.Cli.csproj" />
   </ItemGroup>
 </Project>

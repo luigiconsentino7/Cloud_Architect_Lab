@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using Lab.Ai;
+using Lab.Content;
 using Lab.Ir;
 using Lab.Ir.Challenges;
 using Lab.Ir.Seeds;
@@ -106,63 +107,16 @@ public sealed record ChallengePublicView
     }
 }
 
-/// <summary>Busca guiada na biblioteca: termos casados no título, nas tags, no domínio e na narrativa, sem acentos.</summary>
+/// <summary>Busca guiada na biblioteca (a lógica fica em <see cref="SeedSearch"/>, compartilhada com os evals).</summary>
 public static class LibrarySearch
 {
-    /// <summary>Palavras que não dizem nada sobre o tema (o chat manda frases inteiras, não só palavras-chave).</summary>
-    private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
-    {
-        "de", "da", "do", "das", "dos", "em", "no", "na", "nos", "nas", "um", "uma", "uns", "umas", "os", "as", "ao", "aos", "com", "sem",
-        "por", "para", "pra", "pelo", "pela", "que", "se", "ou", "eu", "me", "meu", "minha", "sou", "estou", "trabalho", "quero", "queria",
-        "treinar", "estudar", "praticar", "aprender", "sobre", "como", "mais", "muito", "isso", "esse", "essa", "tem", "ter", "ser", "num", "numa",
-    };
+    public static IReadOnlyList<LibraryItem> Search(IEnumerable<Seed> seeds, string? query, Difficulty? difficulty, string? track) =>
+        SeedSearch.Rank(seeds, query, difficulty, track)
+            .Select(m => new LibraryItem(m.Seed.Id, m.Seed.Title, m.Seed.Summary, m.Seed.Track, m.Seed.Domain, m.Seed.Tags, m.Seed.Difficulties,
+                m.Seed.Twists.Select(t => new TwistInfo(t.Id, t.Title, t.Description, t.MinDifficulty)).ToList(), m.MatchedTerms, m.Score))
+            .ToList();
 
-    public static IReadOnlyList<LibraryItem> Search(IEnumerable<Seed> seeds, string? query, Difficulty? difficulty, string? track)
-    {
-        var terms = Normalize(query ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(t => t.Length >= 2 && !StopWords.Contains(t)).Distinct().ToList();
-        var results = new List<LibraryItem>();
-        foreach (var seed in seeds)
-        {
-            if (difficulty is { } d && seed.Difficulties.Count > 0 && !seed.Difficulties.Contains(d)) continue;
-            if (!string.IsNullOrWhiteSpace(track) && !string.Equals(seed.Track, track, StringComparison.OrdinalIgnoreCase)) continue;
-
-            var title = Normalize(seed.Title);
-            var tags = seed.Tags.Select(Normalize).ToList();
-            var body = Normalize($"{seed.Summary} {seed.Domain} {seed.Track} {seed.Body["narrative"]}");
-            var matched = new List<string>();
-            var score = 0.0;
-            foreach (var term in terms)
-            {
-                var hit = 0.0;
-                if (title.Contains(term, StringComparison.Ordinal)) hit += 3;
-                if (tags.Any(t => t.Contains(term, StringComparison.Ordinal))) hit += 2;
-                if (body.Contains(term, StringComparison.Ordinal)) hit += 1;
-                if (hit > 0) matched.Add(term);
-                score += hit;
-            }
-
-            if (terms.Count > 0 && score == 0) continue;
-            results.Add(new LibraryItem(seed.Id, seed.Title, seed.Summary, seed.Track, seed.Domain, seed.Tags, seed.Difficulties,
-                seed.Twists.Select(t => new TwistInfo(t.Id, t.Title, t.Description, t.MinDifficulty)).ToList(), matched, score));
-        }
-
-        return results.OrderByDescending(r => r.Score).ThenBy(r => r.Track, StringComparer.Ordinal).ThenBy(r => r.Title, StringComparer.Ordinal).ToList();
-    }
-
-    public static string Normalize(string text)
-    {
-        var decomposed = text.ToLowerInvariant().Normalize(NormalizationForm.FormD);
-        var builder = new StringBuilder(decomposed.Length);
-        foreach (var c in decomposed)
-        {
-            var category = CharUnicodeInfo.GetUnicodeCategory(c);
-            if (category == UnicodeCategory.NonSpacingMark) continue;
-            builder.Append(char.IsLetterOrDigit(c) ? c : ' ');
-        }
-
-        return builder.ToString();
-    }
+    public static string Normalize(string text) => SeedSearch.Normalize(text);
 }
 
 public sealed record CreateChallengeRequest(
@@ -302,10 +256,10 @@ public sealed class ChallengeService(
 
     public async Task<ChallengeBrief?> BriefAsync(Guid challengeId, CancellationToken cancellationToken = default)
     {
-        var json = await db.Challenges.Where(c => c.Id == challengeId).Select(c => c.PublicJson).FirstOrDefaultAsync(cancellationToken);
+        var json = await db.Challenges.Where(c => c.Id == challengeId).Select(c => c.SpecJson).FirstOrDefaultAsync(cancellationToken);
         if (json is null) return null;
-        var view = Json.Deserialize<ChallengePublicView>(json);
-        return new ChallengeBrief(view.Id, view.Title, ChallengeStatement.Write(view), view.Clarifications);
+        var spec = Json.Deserialize<ChallengeSpec>(json);
+        return new ChallengeBrief(challengeId, spec.Title, ChallengeStatement.Write(spec), spec.Clarifications);
     }
 
     private async Task<ChallengeEntity> CreateEntityAsync(ChallengeOrder order, long? variationSeed, CancellationToken cancellationToken)

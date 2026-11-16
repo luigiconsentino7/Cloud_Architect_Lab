@@ -133,10 +133,7 @@ public sealed class ConversationService(
         if (status.Mode == AiMode.Ollama)
         {
             var level = difficulty ?? Difficulty.Senior;
-            var ids = matched.Select(m => m.SeedId).ToList();
-            ids.AddRange(library.Search(null, difficulty, 50).Select(s => s.SeedId).Where(id => !ids.Contains(id)).Take(MaxCandidates - ids.Count));
-            var candidates = ids.Select(content.FindSeed).OfType<Seed>().Where(s => s.Difficulties.Count == 0 || s.Difficulties.Contains(level))
-                .Select(s => SeedCandidate.From(s, level)).ToList();
+            var candidates = Lab.Content.SeedSearch.Candidates(content.Seeds, text, level, MaxCandidates).Select(s => SeedCandidate.From(s, level)).ToList();
             var result = await personalizer.PersonalizeAsync(new PersonalizationRequest(text, level.ToString().ToLowerInvariant(), candidates), cancellationToken);
             if (result is not null)
             {
