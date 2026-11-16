@@ -42,7 +42,7 @@ public sealed class InterviewerAndNarratorTests
             d => { deltas.Add(d); return ValueTask.CompletedTask; }, TestContext.Current.CancellationToken);
 
         answer.Source.ShouldBe(AnswerSource.Ai);
-        answer.PromptVersion.ShouldBe("entrevistador/v1");
+        answer.PromptVersion.ShouldBe("entrevistador/v2");
         string.Concat(deltas).ShouldBe(answer.Text);
         deltas.Count.ShouldBeGreaterThan(1);
         var messages = client.Calls[0].Messages;
@@ -50,6 +50,15 @@ public sealed class InterviewerAndNarratorTests
         messages[0].Text.ShouldContain("<desafio>");
         messages[0].Text.ShouldContain("O DICT pode ficar fora do ar?");
         messages.Select(m => m.Role).ShouldBe([ChatRole.System, ChatRole.User, ChatRole.Assistant, ChatRole.User]);
+    }
+
+    [Fact]
+    public void O_prompt_do_entrevistador_manda_confirmar_que_os_cenarios_ocultos_existem()
+    {
+        var text = TestAi.Prompts().Get(PromptRoles.Interviewer).Text;
+
+        text.ShouldContain("Os cenários ocultos existem");
+        text.ShouldContain("nunca diga que não existem");
     }
 
     [Fact]

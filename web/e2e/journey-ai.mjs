@@ -30,7 +30,8 @@ try {
   assert.match(await page.locator('lab-chat .source').last().innerText(), /IA local/);
   await page.screenshot({ path: `${shots}/ia-contexto.png` });
   const personalizer = ollama.requests.find((r) => r.messages[0].content.startsWith('Você monta desafios'));
-  assert.ok(personalizer?.format?.properties?.seedId?.enum?.length > 0, 'o personalizador manda o JSON Schema com os seedId candidatos');
+  assert.ok(personalizer?.format?.anyOf?.length > 0, 'o personalizador manda o JSON Schema por semente (um ramo por candidata)');
+  assert.ok(personalizer.format.anyOf.every((b) => b.properties.seedId.const), 'cada ramo fixa o seedId');
   assert.equal(personalizer.options?.num_ctx, 8192, 'janela de contexto configurada');
   assert.match(personalizer.messages[1].content, /<contexto_do_usuario>/, 'o contexto vai delimitado como dado');
 
@@ -66,6 +67,7 @@ try {
   await page.waitForSelector('.map-actions button:has-text("(IA)")', { timeout: 30_000 });
   const mapper = ollama.requests.find((r) => r.messages[0].content.startsWith('Você ajuda a tipar'));
   assert.ok(mapper?.format?.properties?.catalogId?.enum?.includes('nenhum'), 'o mapeador manda a paleta e a opção "nenhum" no schema');
+  assert.equal(Object.keys(mapper.format.properties)[0], 'componente', 'o mapeador decide primeiro se a forma é um componente');
   await page.click('.map-actions button:has-text("(IA)")');
   await waitFor(async () => (await api(`/api/challenges/${shapes.challengeId}/attempts`)).at(-1).scene.elements.find((e) => e.id === 'shape_0')?.customData?.kind, (k) => k === 'component', 15_000);
   const left = await waitFor(async () => page.locator('button.problem.info').count(), (n) => n === 0, 15_000);

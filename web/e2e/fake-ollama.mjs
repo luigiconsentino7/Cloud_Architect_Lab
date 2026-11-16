@@ -6,7 +6,8 @@ const interviewAnswer =
   'Boa pergunta. O enunciado não fixa esse ponto: pode assumir, mas deixe a premissa explícita no desenho e pense no que acontece se a mesma ordem chegar duas vezes.';
 
 function personalize(format) {
-  const seeds = format?.properties?.seedId?.enum ?? [];
+  // Esquema por semente (anyOf com o seedId fixo em cada ramo) ou o esquema simples de reserva.
+  const seeds = format?.anyOf?.map((branch) => branch.properties.seedId.const) ?? format?.properties?.seedId?.enum ?? [];
   return {
     seedId: seeds.find((s) => s.includes('pix')) ?? seeds[0],
     narrative: 'A FinBank vai lançar Pix por aproximação no próximo trimestre e o time precisa garantir que nenhum cliente pague duas vezes.',
@@ -19,7 +20,7 @@ function personalize(format) {
 
 function mapLabel(format) {
   const ids = (format?.properties?.catalogId?.enum ?? []).filter((id) => id !== 'nenhum');
-  return { catalogId: ids.find((id) => id.includes('lambda') || id.includes('functions')) ?? ids[0] ?? 'nenhum', reason: 'Regras de negócio rodam bem em funções.' };
+  return { componente: true, catalogId: ids.find((id) => id.includes('lambda') || id.includes('functions')) ?? ids[0] ?? 'nenhum', reason: 'Regras de negócio rodam bem em funções.' };
 }
 
 function narrate(user) {

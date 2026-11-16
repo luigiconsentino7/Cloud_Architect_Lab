@@ -8,8 +8,9 @@ using Microsoft.Extensions.Logging;
 namespace Lab.Ai;
 
 /// <summary>
-/// Sugere o componente do catálogo para uma forma desenhada à mão cujo rótulo não casou com nenhum alias. O schema só
-/// aceita ids da paleta do provedor ou "nenhum" (anotação de texto livre), então não sai componente inventado.
+/// Sugere o componente do catálogo para uma forma desenhada à mão cujo rótulo não casou com nenhum alias. O modelo
+/// decide primeiro se o rótulo é um componente ou só uma anotação (nos evals reais, os dois modelos tipavam anotações
+/// como serviço quando "nenhum" era uma opção entre 30 ids); o schema só aceita ids da paleta do provedor ou "nenhum".
 /// </summary>
 public sealed class LabelMapper(AiRuntime runtime, PromptLibrary prompts, ILogger<LabelMapper> logger) : ILabelMapper
 {
@@ -30,6 +31,8 @@ public sealed class LabelMapper(AiRuntime runtime, PromptLibrary prompts, ILogge
             using var deadline = runtime.Deadline(cancellationToken);
             var response = await client.GetResponseAsync(messages, options, deadline.Token);
             var json = AiText.ParseObject(response.Text);
+            // O modelo decidiu que é uma anotação: nada a sugerir (a resposta sem o campo vale pelo catalogId).
+            if (json?["componente"] is JsonValue gate && gate.TryGetValue<bool>(out var isComponent) && !isComponent) return null;
             var catalogId = json?["catalogId"] is JsonValue v && v.TryGetValue<string>(out var id) ? id : null;
             if (catalogId is null || catalogId == None || request.Candidates.All(c => c.CatalogId != catalogId)) return null;
             var reason = json?["reason"] is JsonValue r && r.TryGetValue<string>(out var text) ? AiText.Clean(text, 200) : "";
@@ -49,6 +52,7 @@ public sealed class LabelMapper(AiRuntime runtime, PromptLibrary prompts, ILogge
             ["type"] = "object",
             ["properties"] = new JsonObject
             {
+                ["componente"] = new JsonObject { ["type"] = "boolean" },
                 ["catalogId"] = new JsonObject
                 {
                     ["type"] = "string",
@@ -56,7 +60,7 @@ public sealed class LabelMapper(AiRuntime runtime, PromptLibrary prompts, ILogge
                 },
                 ["reason"] = new JsonObject { ["type"] = "string" },
             },
-            ["required"] = new JsonArray("catalogId", "reason"),
+            ["required"] = new JsonArray("componente", "catalogId", "reason"),
         });
 
     /// <summary>O rótulo entra delimitado, como dado.</summary>

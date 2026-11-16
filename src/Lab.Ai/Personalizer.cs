@@ -22,82 +22,116 @@ public sealed class ChallengePersonalizer(AiRuntime runtime, PromptLibrary promp
         if (client is null) return null;
 
         var prompt = prompts.Get(PromptRoles.Personalizer);
-        var options = runtime.ChatOptions(temperature: 0.4f, maxOutputTokens: 700);
-        options.ResponseFormat = ChatResponseFormat.ForJsonSchema(Schema(request.Candidates), "delta_desafio", "Delta de personalização sobre uma semente");
         List<ChatMessage> messages = [new(ChatRole.System, prompt.Text), new(ChatRole.User, UserMessage(request))];
-        try
+        using var deadline = runtime.Deadline(cancellationToken);
+
+        // 1ª tentativa: esquema por semente (o seedId escolhido já limita variáveis e pegadinhas). Se o Ollama recusar
+        // esse esquema, 2ª tentativa com o esquema simples, que sempre funcionou: a personalização nunca regride.
+        for (var perSeed = true; ; perSeed = false)
         {
-            using var deadline = runtime.Deadline(cancellationToken);
-            var response = await client.GetResponseAsync(messages, options, deadline.Token);
-            var json = AiText.ParseObject(response.Text);
-            var validated = json is null ? null : DeltaValidator.Validate(json, request);
-            if (validated is null)
+            try
             {
-                logger.LogInformation("Personalização descartada: a resposta do modelo não passou na validação.");
-                // O conteúdo só vai para depuração (o log padrão não guarda texto de conversa); os evals o mostram.
-                logger.LogDebug("Resposta descartada do modelo: {Resposta}", AiText.Clean(response.Text, 240));
+                var options = runtime.ChatOptions(temperature: 0.4f, maxOutputTokens: 700);
+                options.ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                    perSeed ? SchemaPerSeed(request.Candidates) : Schema(request.Candidates), "delta_desafio", "Delta de personalização sobre uma semente");
+                var response = await client.GetResponseAsync(messages, options, deadline.Token);
+                var json = AiText.ParseObject(response.Text);
+                var validated = json is null ? null : DeltaValidator.Validate(json, request);
+                if (validated is null)
+                {
+                    logger.LogInformation("Personalização descartada: a resposta do modelo não passou na validação.");
+                    // O conteúdo só vai para depuração (o log padrão não guarda texto de conversa); os evals o mostram.
+                    logger.LogDebug("Resposta descartada do modelo: {Resposta}", AiText.Clean(response.Text, 240));
+                    return null;
+                }
+
+                return new PersonalizationResult(validated.Value.Delta, runtime.Options.Ollama.Model, prompt.Id, validated.Value.Adjustments);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                if (perSeed)
+                {
+                    logger.LogInformation("O Ollama não aceitou o esquema por semente ({Erro}); tentando o esquema simples.", ex.GetType().Name);
+                    continue;
+                }
+
+                logger.LogWarning(ex, "A IA local falhou ao personalizar o desafio; seguindo com a busca guiada.");
+                runtime.Invalidate();
                 return null;
             }
-
-            return new PersonalizationResult(validated.Value.Delta, runtime.Options.Ollama.Model, prompt.Id, validated.Value.Adjustments);
-        }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            logger.LogWarning(ex, "A IA local falhou ao personalizar o desafio; seguindo com a busca guiada.");
-            runtime.Invalidate();
-            return null;
         }
     }
 
-    /// <summary>JSON Schema da resposta: o Ollama vira isso numa gramática, então só sai id que existe.</summary>
+    /// <summary>
+    /// JSON Schema por semente: um ramo para cada candidata, com o <c>seedId</c> fixo e só as variáveis e pegadinhas dela.
+    /// O Ollama transforma isso numa gramática, então uma pegadinha de outra semente nem consegue ser escrita.
+    /// </summary>
+    public static JsonElement SchemaPerSeed(IReadOnlyList<SeedCandidate> candidates)
+    {
+        var branches = candidates.Select(c => (JsonNode)new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = Properties(
+                new JsonObject { ["const"] = c.SeedId },
+                c.Variables.Keys.Order(StringComparer.Ordinal).ToList(),
+                c.Twists.Select(t => t.Id).Order(StringComparer.Ordinal).ToList()),
+            ["required"] = new JsonArray("seedId", "narrative", "variables", "twists", "reason"),
+        }).ToArray();
+        return JsonSerializer.SerializeToElement(new JsonObject { ["anyOf"] = new JsonArray(branches) });
+    }
+
+    /// <summary>JSON Schema simples: as variáveis e pegadinhas de todas as candidatas juntas (o validador descarta as que não valem para a escolhida).</summary>
     public static JsonElement Schema(IReadOnlyList<SeedCandidate> candidates)
     {
-        var variableNames = candidates.SelectMany(c => c.Variables.Keys).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
-        var twistIds = candidates.SelectMany(c => c.Twists.Select(t => t.Id)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
-        static JsonArray Enum(IEnumerable<string> values) => new(values.Select(v => (JsonNode)JsonValue.Create(v)).ToArray());
-
         var schema = new JsonObject
         {
             ["type"] = "object",
-            ["properties"] = new JsonObject
-            {
-                ["seedId"] = new JsonObject { ["type"] = "string", ["enum"] = Enum(candidates.Select(c => c.SeedId)) },
-                ["narrative"] = new JsonObject { ["type"] = "string" },
-                ["variables"] = variableNames.Count == 0
-                    ? new JsonObject { ["type"] = "array", ["maxItems"] = 0 }
-                    : new JsonObject
-                    {
-                        ["type"] = "array",
-                        ["items"] = new JsonObject
-                        {
-                            ["type"] = "object",
-                            ["properties"] = new JsonObject
-                            {
-                                ["name"] = new JsonObject { ["type"] = "string", ["enum"] = Enum(variableNames) },
-                                ["value"] = new JsonObject { ["type"] = "number" },
-                            },
-                            ["required"] = new JsonArray("name", "value"),
-                        },
-                    },
-                ["twists"] = twistIds.Count == 0
-                    ? new JsonObject { ["type"] = "array", ["maxItems"] = 0 }
-                    : new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["enum"] = Enum(twistIds) } },
-                ["clarificationsExtra"] = new JsonObject
-                {
-                    ["type"] = "array",
-                    ["items"] = new JsonObject
-                    {
-                        ["type"] = "object",
-                        ["properties"] = new JsonObject { ["q"] = new JsonObject { ["type"] = "string" }, ["a"] = new JsonObject { ["type"] = "string" } },
-                        ["required"] = new JsonArray("q", "a"),
-                    },
-                },
-                ["reason"] = new JsonObject { ["type"] = "string" },
-            },
+            ["properties"] = Properties(
+                new JsonObject { ["type"] = "string", ["enum"] = Enum(candidates.Select(c => c.SeedId)) },
+                candidates.SelectMany(c => c.Variables.Keys).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList(),
+                candidates.SelectMany(c => c.Twists.Select(t => t.Id)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList()),
             ["required"] = new JsonArray("seedId", "narrative", "variables", "twists", "reason"),
         };
         return JsonSerializer.SerializeToElement(schema);
     }
+
+    private static JsonArray Enum(IEnumerable<string> values) => new(values.Select(v => (JsonNode)JsonValue.Create(v)).ToArray());
+
+    private static JsonObject Properties(JsonNode seedId, IReadOnlyList<string> variableNames, IReadOnlyList<string> twistIds) => new()
+    {
+        ["seedId"] = seedId,
+        ["narrative"] = new JsonObject { ["type"] = "string" },
+        ["variables"] = variableNames.Count == 0
+            ? new JsonObject { ["type"] = "array", ["maxItems"] = 0 }
+            : new JsonObject
+            {
+                ["type"] = "array",
+                ["items"] = new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JsonObject
+                    {
+                        ["name"] = new JsonObject { ["type"] = "string", ["enum"] = Enum(variableNames) },
+                        ["value"] = new JsonObject { ["type"] = "number" },
+                    },
+                    ["required"] = new JsonArray("name", "value"),
+                },
+            },
+        ["twists"] = twistIds.Count == 0
+            ? new JsonObject { ["type"] = "array", ["maxItems"] = 0 }
+            : new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["enum"] = Enum(twistIds) } },
+        ["clarificationsExtra"] = new JsonObject
+        {
+            ["type"] = "array",
+            ["items"] = new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = new JsonObject { ["q"] = new JsonObject { ["type"] = "string" }, ["a"] = new JsonObject { ["type"] = "string" } },
+                ["required"] = new JsonArray("q", "a"),
+            },
+        },
+        ["reason"] = new JsonObject { ["type"] = "string" },
+    };
 
     /// <summary>O contexto entra delimitado, como dado: instruções dentro dele não valem.</summary>
     public static string UserMessage(PersonalizationRequest request)

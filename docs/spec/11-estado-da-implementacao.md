@@ -34,6 +34,9 @@ Todos os 21 itens do backlog do MVP ([10](10-roadmap-e-riscos.md#backlog-do-mvp-
 | Narrador confere números e componentes citados | Confere os números; componentes não são checados | Nomes de componentes são texto livre do usuário, sem um jeito confiável de conferir; o prompt proíbe inventar |
 | A narrativa de IA substitui o enunciado | A narrativa entra antes do enunciado curado, que continua com os números | Os números do desafio vêm das variáveis; o modelo não pode contradizê-los |
 | `ILabelMapper` sugere para qualquer forma | Os aliases do catálogo resolvem o que casam; a IA só é consultada para rótulos que não casaram, sob demanda (botão), e o schema só aceita ids da paleta ou "nenhum" | Cada consulta leva segundos num modelo local: a validação ao vivo não pode esperar por ela |
+| Esquema do personalizador: "a lista de IDs válidos" | JSON Schema por semente (`anyOf`, um ramo por candidata com o `seedId` fixo e só as pegadinhas e variáveis dela), com o esquema simples como reserva se o Ollama recusar o primeiro | No S4 real, em 20 de 24 respostas o modelo escolheu pegadinhas de outra semente (o esquema simples listava as de todas) e a validação as descartava |
+| Mapeador: escolhe um id ou "nenhum" | Decide primeiro `componente` (sim ou não) e só então o id; prompt v2 com exemplos | No S4 real os dois modelos tipavam anotações como serviço (`time de plataforma` virou `aws.cognito`) quando "nenhum" era uma opção entre 30 ids |
+| Entrevistador: "diga que não tem essa informação" sobre os cenários ocultos | Prompt v2 manda confirmar que eles existem e que o conteúdo é desconhecido; o eval reprova quem nega | No S4 real o qwen2.5:3b respondeu "não há cenários de teste ocultos", o que é falso, e o eval antigo só olhava vazamento |
 | Porta `IFlowRanker` | Não implementada: a sugestão de fluxos é a busca no grafo | Os evals ainda não mostraram ganho real com o modelo local |
 
 ### API e tempo real ([08](08-dados-e-api.md))
@@ -79,13 +82,35 @@ Todos os 21 itens do backlog do MVP ([10](10-roadmap-e-riscos.md#backlog-do-mvp-
 - **Catálogo:** os valores são ilustrativos, com link oficial e data de revisão por serviço; a calibração fina é
   trabalho contínuo com a skill `calibrar-catalogo`.
 
+## Spike S4: primeira rodada real (16/11/2026)
+
+`lab ai eval` na máquina de referência (RTX 3050 Laptop, 4 GB), Ollama local, modelo já carregado. Tempos: mediana por
+caso. A rodada usou o personalizador com esquema simples, o mapeador e o entrevistador na versão 1.
+
+| | qwen2.5:3b | gemma3:4b |
+|---|---|---|
+| Personalizador (12 contextos) | 11/12 (92%) · 3,5 s | 12/12 (100%) · 14,5 s |
+| Entrevistador (8 perguntas) | 8/8 · 0,6 s | 8/8 · 2,2 s |
+| Narrador (3 revisões) | 3/3 · 6,2 s | 3/3 · 11,3 s |
+| Mapeador (8 rótulos) | 5/8 (63%) · 1,0 s | 6/8 (75%) · 3,7 s |
+| Primeiro token · tokens/s | 0,1 s · 71,5 | 0,6 s · 18,6 |
+| Critérios do S4 | passa | passa |
+
+- O qwen2.5:3b cabe inteiro nos 4 GB (4× mais rápido); o gemma3:4b passa dos 4 GB, divide camadas com a CPU e fica na
+  beirada dos 15 tokens/s. Os dois passam no S4; a escolha é precisão × velocidade.
+- Pontos fracos vistos nos dois: pegadinhas de outras sementes (corrigido com o esquema por semente) e anotações
+  tipadas como serviço (corrigido com a decisão `componente`). Só o qwen: uma semente errada (razão contábil virou
+  Pix), "PDF" virou `aws.secretsmanager` e a negação dos cenários ocultos.
+- Os números não dizem se a escrita em português é boa: o relatório novo traz as narrativas, os comentários do mentor
+  e as respostas do entrevistador para serem lidos.
+- Decisão provisória: o padrão continua `qwen2.5:3b` (cabe na GPU sem disputar a CPU com o motor de simulação e
+  responde em menos de 1 s no chat); `gemma3:4b` é a opção de mais precisão (`Ai:Ollama:Model`). Fecha depois de
+  repetir a rodada com as correções.
+
 ## O que fica para as próximas fases ([10](10-roadmap-e-riscos.md))
 
-- Rodar `lab ai eval` na máquina de referência (RTX 3050, 4 GB) com 2–3 modelos de 3–4B e fixar o modelo padrão. A
-  primeira rodada real (16/11/2026, `gemma3:4b`) deu personalizador 12/12 e entrevistador 8/8 (≈ 2 s por resposta;
-  ≈ 15 s por personalização); os resultados do narrador e do mapeador daquela rodada são inválidos (o bug de checagem
-  acima) e a velocidade não foi medida: falta repetir com o runner corrigido, que separa erro do Ollama de resposta
-  errada, e comparar com o `qwen2.5:3b`.
+- Repetir o `lab ai eval` com os prompts e esquemas novos (a rodada abaixo é anterior a eles) e fixar o modelo padrão
+  depois de ler as amostras de texto do relatório.
 - Fase 2: replay da simulação no canvas, comparação entre tentativas, cenários extras (soak, queda de região, crash
   entre gravar e publicar), recomendador, 25+ conquistas, ponte manual com o claude.ai, porta `IFlowRanker`, métricas
   OpenTelemetry e motor em WebAssembly no CI.

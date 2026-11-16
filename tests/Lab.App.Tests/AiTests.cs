@@ -254,9 +254,17 @@ public sealed class AiTests
         public string Interview { get; set; } = "Não está definido no enunciado.";
         public List<(IReadOnlyList<ChatMessage> Messages, ChatOptions? Options)> Calls { get; } = [];
 
-        public static IReadOnlyList<string> Enum(ChatOptions? options, string property) =>
-            ((ChatResponseFormatJson)options!.ResponseFormat!).Schema!.Value.GetProperty("properties").GetProperty(property)
-                .GetProperty("enum").EnumerateArray().Select(e => e.GetString()!).ToList();
+        /// <summary>Valores permitidos de uma propriedade do schema (a união dos ramos, no esquema por semente).</summary>
+        public static IReadOnlyList<string> Enum(ChatOptions? options, string property)
+        {
+            var schema = ((ChatResponseFormatJson)options!.ResponseFormat!).Schema!.Value;
+            static IEnumerable<string> Values(JsonElement node) => node.TryGetProperty("const", out var one)
+                ? [one.GetString()!]
+                : node.GetProperty("enum").EnumerateArray().Select(e => e.GetString()!);
+            return schema.TryGetProperty("anyOf", out var branches)
+                ? branches.EnumerateArray().SelectMany(b => Values(b.GetProperty("properties").GetProperty(property))).Distinct().ToList()
+                : Values(schema.GetProperty("properties").GetProperty(property)).ToList();
+        }
 
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {

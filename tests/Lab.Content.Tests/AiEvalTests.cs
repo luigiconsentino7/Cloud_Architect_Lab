@@ -112,6 +112,77 @@ public sealed partial class AiEvalTests
     }
 
     [Fact]
+    public async Task Entrevistador_que_nega_que_os_cenarios_ocultos_existem_e_reprovado_mesmo_sem_vazar()
+    {
+        var runner = new AiEvalRunner(Content, Prompts, TextWriter.Null);
+
+        var report = await runner.RunAsync(Runtime(new RightModel { DenyHiddenScenarios = true }), [PromptRoles.Interviewer], null, TestContext.Current.CancellationToken);
+
+        var hidden = report.For(PromptRoles.Interviewer).Single(c => c.Case.Contains("ocultos", StringComparison.Ordinal));
+        hidden.Passed.ShouldBeFalse();
+        hidden.Detail.ShouldContain("os cenários ocultos existem");
+        report.For(PromptRoles.Interviewer).Where(c => c != hidden).ShouldAllBe(c => c.Passed, "só a negação reprova");
+    }
+
+    [Fact]
+    public async Task Relatorio_traz_o_que_a_ia_escreveu_e_a_narracao_que_so_passou_na_segunda_tentativa()
+    {
+        var runner = new AiEvalRunner(Content, Prompts, TextWriter.Null) { NarrationEventBudget = 1_000_000 };
+
+        var report = await runner.RunAsync(Runtime(new RightModel { FlakyNarrator = true }),
+            [PromptRoles.Personalizer, PromptRoles.Interviewer, PromptRoles.Narrator], 1, TestContext.Current.CancellationToken);
+
+        report.For(PromptRoles.Personalizer).Single().Sample.ShouldNotBeNull().ShouldContain("Um banco digital quer crescer.");
+        report.For(PromptRoles.Interviewer).Single().Sample.ShouldNotBeNull();
+        var narration = report.For(PromptRoles.Narrator).Single();
+        narration.Passed.ShouldBeTrue(narration.Detail);
+        narration.Detail.ShouldContain("só passou na 2ª tentativa");
+        narration.Sample.ShouldNotBeNull().ShouldStartWith("Nota ");
+
+        var markdown = AiEvalReport.Markdown([report], "http://127.0.0.1:9", DateTime.Now);
+        markdown.ShouldContain("### O que a IA escreveu");
+        markdown.ShouldContain("**Comentário do mentor (narrador)**");
+        markdown.ShouldContain("> Um banco digital quer crescer.");
+    }
+
+    private static ModelEvalReport Synthetic(string model, double quality, double seconds, double tokensPerSecond)
+    {
+        var cases = new List<EvalCaseResult>();
+        foreach (var role in new[] { PromptRoles.Personalizer, PromptRoles.Interviewer })
+        {
+            for (var i = 0; i < 10; i++)
+                cases.Add(new EvalCaseResult(role, $"caso {i}", i < quality * 10, seconds, "d", new Dictionary<string, bool>()));
+        }
+
+        return new ModelEvalReport(model, cases, new SpeedProbe(0.4, tokensPerSecond, false), null);
+    }
+
+    [Fact]
+    public void Recomendacao_mostra_a_troca_quando_o_mais_preciso_nao_e_o_mais_rapido()
+    {
+        var slowAccurate = Synthetic("gemma", quality: 1.0, seconds: 8, tokensPerSecond: 18);
+        var fastLoose = Synthetic("qwen", quality: 0.9, seconds: 2, tokensPerSecond: 70);
+
+        var markdown = AiEvalReport.Markdown([fastLoose, slowAccurate], "x", DateTime.Now);
+
+        markdown.ShouldContain("Mais preciso: **gemma** (100% de acerto médio nos papéis e 8,0 s por chamada)");
+        markdown.ShouldContain("Mais rápido: **qwen** (90% de acerto médio nos papéis e 2,0 s por chamada; 4,0× mais rápido)");
+        markdown.ShouldNotContain("Sugestão de modelo padrão");
+    }
+
+    [Fact]
+    public void Recomendacao_e_direta_quando_o_mesmo_modelo_ganha_nos_dois()
+    {
+        var best = Synthetic("qwen", quality: 1.0, seconds: 2, tokensPerSecond: 70);
+        var worse = Synthetic("gemma", quality: 0.9, seconds: 8, tokensPerSecond: 18);
+
+        var markdown = AiEvalReport.Markdown([worse, best], "x", DateTime.Now);
+
+        markdown.ShouldContain("Sugestão de modelo padrão: **qwen**");
+        markdown.ShouldContain("o mais preciso e o mais rápido");
+    }
+
+    [Fact]
     public async Task Narrador_comenta_a_revisao_da_referencia_degradada()
     {
         var runner = new AiEvalRunner(Content, Prompts, TextWriter.Null) { NarrationEventBudget = 1_000_000 };
@@ -134,7 +205,7 @@ public sealed partial class AiEvalTests
 
         report.Errors.ShouldBe(0); // resposta errada é reprovação, não erro de conexão
         report.For(PromptRoles.Interviewer).Where(c => c.Flags.ContainsKey("no-spoiler")).ShouldAllBe(c => !c.Passed);
-        report.For(PromptRoles.Mapper).Count(c => c.Passed).ShouldBe(2); // só as duas anotações ("nenhum")
+        report.For(PromptRoles.Mapper).Count(c => c.Passed).ShouldBe(4); // só as quatro anotações ("nenhum")
         report.MeetsS4.ShouldBeTrue(); // sem personalizador no relatório, o S4 olha só a velocidade
     }
 
@@ -167,6 +238,12 @@ public sealed partial class AiEvalTests
 
         public bool InventNumbers { get; init; }
 
+        /// <summary>Diz que não há cenários ocultos (mentira: eles existem) sem vazar nenhum nome.</summary>
+        public bool DenyHiddenScenarios { get; init; }
+
+        /// <summary>Na primeira tentativa de cada narração cita um número que a revisão não tem; na segunda acerta.</summary>
+        public bool FlakyNarrator { get; init; }
+
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
             if (++_calls == FailOnCall) throw new HttpRequestException("conexão recusada");
@@ -177,7 +254,7 @@ public sealed partial class AiEvalTests
             string text;
             if (system.StartsWith("Você monta desafios", StringComparison.Ordinal))
             {
-                var seeds = schema!.Value.GetProperty("properties").GetProperty("seedId").GetProperty("enum").EnumerateArray().Select(e => e.GetString()!).ToList();
+                var seeds = schema!.Value.GetProperty("anyOf").EnumerateArray().Select(b => b.GetProperty("properties").GetProperty("seedId").GetProperty("const").GetString()!).ToList();
                 text = JsonSerializer.Serialize(new { seedId = seeds[0], narrative = "Um banco digital quer crescer.", variables = Array.Empty<object>(), twists = Array.Empty<string>(), reason = "casa com o contexto" });
             }
             else if (system.StartsWith("Você ajuda a tipar", StringComparison.Ordinal))
@@ -194,7 +271,8 @@ public sealed partial class AiEvalTests
                 var review = JsonNode.Parse(request[(request.IndexOf("<revisao>", StringComparison.Ordinal) + 9)..request.IndexOf("</revisao>", StringComparison.Ordinal)])!;
                 var score = Regex.Match(request, @"Nota final: (\d+)").Groups[1].Value;
                 var top = review["melhorias"]?[0]?["titulo"]?.GetValue<string>() ?? "";
-                text = InventNumbers
+                var firstTry = FlakyNarrator && list.Count(m => m.Role == ChatRole.User) == 1;
+                text = InventNumbers || firstTry
                     ? JsonSerializer.Serialize(new { paragraphs = new[] { $"Nota {score}, mas o p99 chegou a 98.765 ms." } })
                     : JsonSerializer.Serialize(new { paragraphs = new[] { $"Nota {score}: o ponto que mais pesou foi {Regex.Replace(top, @"\d", "")}." } });
             }
@@ -204,7 +282,9 @@ public sealed partial class AiEvalTests
             }
             else if (user.Contains("solução", StringComparison.Ordinal) || user.Contains("ocultos", StringComparison.Ordinal))
             {
-                text = LeakReference ? $"Os cenários ocultos são {string.Join(", ", HiddenNames())} e a referência usa cache-chaves." : "Não tenho essa informação: pense no que o enunciado pede.";
+                text = LeakReference ? $"Os cenários ocultos são {string.Join(", ", HiddenNames())} e a referência usa cache-chaves."
+                    : DenyHiddenScenarios && user.Contains("ocultos", StringComparison.Ordinal) ? "Não há cenários de teste ocultos nesta avaliação."
+                    : "Não tenho essa informação: pense no que o enunciado pede.";
             }
             else
             {

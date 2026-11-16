@@ -39,6 +39,57 @@ public sealed class PersonalizerTests
     }
 
     [Fact]
+    public void O_esquema_por_semente_so_deixa_escrever_as_pegadinhas_e_variaveis_da_semente_escolhida()
+    {
+        var branches = ChallengePersonalizer.SchemaPerSeed([Pix, Ledger]).GetProperty("anyOf").EnumerateArray().ToList();
+
+        branches.Count.ShouldBe(2);
+        var pix = branches[0].GetProperty("properties");
+        pix.GetProperty("seedId").GetProperty("const").GetString().ShouldBe("pix/envio-pix");
+        pix.GetProperty("twists").GetProperty("items").GetProperty("enum").EnumerateArray().Select(e => e.GetString()).ShouldBe(["conta-quente"]);
+        pix.GetProperty("variables").GetProperty("items").GetProperty("properties").GetProperty("name").GetProperty("enum")
+            .EnumerateArray().Select(e => e.GetString()).ShouldBe(["baselineRps"]);
+
+        var ledger = branches[1].GetProperty("properties"); // sem pegadinhas nem variáveis: nada para escolher
+        ledger.GetProperty("seedId").GetProperty("const").GetString().ShouldBe("ledger/razao");
+        ledger.GetProperty("twists").GetProperty("maxItems").GetInt32().ShouldBe(0);
+        ledger.GetProperty("variables").GetProperty("maxItems").GetInt32().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Se_o_ollama_recusa_o_esquema_por_semente_tenta_o_esquema_simples()
+    {
+        var client = new FakeChatClient((_, options) => TestAi.Json(new
+        {
+            seedId = FakeChatClient.SchemaEnum(options, "seedId")[0],
+            narrative = "A FinBank vai crescer.",
+            variables = Array.Empty<object>(),
+            twists = Array.Empty<string>(),
+            reason = "Pix.",
+        }))
+        { FailFirstCalls = 1 };
+        var personalizer = new ChallengePersonalizer(TestAi.Runtime(client), TestAi.Prompts(), TestAi.Log<ChallengePersonalizer>());
+
+        var result = await personalizer.PersonalizeAsync(Request(), TestContext.Current.CancellationToken);
+
+        result.ShouldNotBeNull();
+        client.Calls.Count.ShouldBe(2);
+        FakeChatClient.HasAnyOf(client.Calls[0].Options).ShouldBeTrue();
+        FakeChatClient.HasAnyOf(client.Calls[1].Options).ShouldBeFalse(); // a 2ª usa o esquema simples, que sempre funcionou
+    }
+
+    [Fact]
+    public async Task Resposta_invalida_nao_gasta_a_segunda_tentativa()
+    {
+        var client = new FakeChatClient((_, _) => "{}");
+        var personalizer = new ChallengePersonalizer(TestAi.Runtime(client), TestAi.Prompts(), TestAi.Log<ChallengePersonalizer>());
+
+        (await personalizer.PersonalizeAsync(Request(), TestContext.Current.CancellationToken)).ShouldBeNull();
+
+        client.Calls.Count.ShouldBe(1); // só falha de esquema/conexão tenta de novo; resposta ruim é descartada
+    }
+
+    [Fact]
     public async Task O_contexto_vai_delimitado_como_dado()
     {
         var client = new FakeChatClient((_, _) => "{}");
@@ -101,6 +152,30 @@ public sealed class LabelMapperTests
         if (expected is null) suggestion.ShouldBeNull();
         FakeChatClient.SchemaEnum(client.Calls[0].Options, "catalogId").ShouldBe(["aws.sqs", "aws.lambda", "nenhum"]);
         client.Calls[0].Messages[1].Text.ShouldContain("Componente mais próximo no desenho: pix-service");
+    }
+
+    [Fact]
+    public async Task Rotulo_que_o_modelo_diz_ser_anotacao_nao_ganha_sugestao_mesmo_com_id_valido()
+    {
+        var client = new FakeChatClient((_, _) => TestAi.Json(new { componente = false, catalogId = "aws.sqs", reason = "é um lembrete" }));
+        var mapper = new LabelMapper(TestAi.Runtime(client), TestAi.Prompts(), TestAi.Log<LabelMapper>());
+
+        (await mapper.SuggestAsync(Request, TestContext.Current.CancellationToken)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task O_modelo_decide_primeiro_se_e_componente_e_o_prompt_traz_exemplos()
+    {
+        var client = new FakeChatClient((_, _) => TestAi.Json(new { componente = true, catalogId = "aws.sqs", reason = "fila" }));
+        var mapper = new LabelMapper(TestAi.Runtime(client), TestAi.Prompts(), TestAi.Log<LabelMapper>());
+
+        var suggestion = await mapper.SuggestAsync(Request, TestContext.Current.CancellationToken);
+
+        suggestion!.CatalogId.ShouldBe("aws.sqs");
+        suggestion.PromptVersion.ShouldBe("mapeador/v2");
+        var schema = ((Microsoft.Extensions.AI.ChatResponseFormatJson)client.Calls[0].Options!.ResponseFormat!).Schema!.Value;
+        schema.GetProperty("properties").EnumerateObject().Select(p => p.Name).ShouldBe(["componente", "catalogId", "reason"]); // a decisão vem antes do id
+        client.Calls[0].Messages[0].Text.ShouldContain("componente: true só se");
     }
 
     [Fact]

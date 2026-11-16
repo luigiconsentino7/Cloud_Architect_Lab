@@ -12,11 +12,15 @@ public sealed class FakeChatClient(Func<IReadOnlyList<ChatMessage>, ChatOptions?
 
     public Exception? Failure { get; set; }
 
+    /// <summary>As N primeiras chamadas falham (ex.: o Ollama recusou o esquema); as seguintes funcionam.</summary>
+    public int FailFirstCalls { get; set; }
+
     public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
         var list = messages.ToList();
         lock (Calls) Calls.Add((list, options));
         if (Failure is not null) throw Failure;
+        if (Calls.Count <= FailFirstCalls) throw new HttpRequestException("esquema recusado");
         return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, respond(list, options))));
     }
 
@@ -33,14 +37,24 @@ public sealed class FakeChatClient(Func<IReadOnlyList<ChatMessage>, ChatOptions?
     {
     }
 
-    /// <summary>Os valores de um enum do JSON Schema da resposta (ex.: os seedId candidatos).</summary>
+    /// <summary>Os valores permitidos de uma propriedade no JSON Schema da resposta (união dos ramos, quando há <c>anyOf</c>).</summary>
     public static IReadOnlyList<string> SchemaEnum(ChatOptions? options, string property)
     {
         var schema = (options?.ResponseFormat as ChatResponseFormatJson)?.Schema ?? throw new InvalidOperationException("sem schema");
-        var node = schema.GetProperty("properties").GetProperty(property);
+        if (schema.TryGetProperty("anyOf", out var branches))
+            return branches.EnumerateArray().SelectMany(b => Values(b.GetProperty("properties").GetProperty(property))).Distinct().ToList();
+        return Values(schema.GetProperty("properties").GetProperty(property)).ToList();
+    }
+
+    public static bool HasAnyOf(ChatOptions? options) =>
+        (options?.ResponseFormat as ChatResponseFormatJson)?.Schema is { } schema && schema.TryGetProperty("anyOf", out _);
+
+    private static IEnumerable<string> Values(JsonElement node)
+    {
+        if (node.TryGetProperty("const", out var one)) return [one.GetString()!];
         if (node.TryGetProperty("items", out var items)) node = items;
         if (node.TryGetProperty("properties", out var inner)) node = inner.GetProperty("name");
-        return node.GetProperty("enum").EnumerateArray().Select(e => e.GetString()!).ToList();
+        return node.GetProperty("enum").EnumerateArray().Select(e => e.GetString()!);
     }
 }
 

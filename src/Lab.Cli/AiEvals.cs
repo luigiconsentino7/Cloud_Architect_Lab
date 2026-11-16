@@ -16,7 +16,8 @@ namespace Lab.Cli;
 
 /// <param name="Flags">Critérios parciais do caso (ex.: delta válido, monta o desafio, aderente ao contexto).</param>
 /// <param name="Error">O Ollama falhou (conexão, tempo esgotado): não é resposta errada, e o caso não entra na conta.</param>
-public sealed record EvalCaseResult(string Role, string Case, bool Passed, double Seconds, string Detail, IReadOnlyDictionary<string, bool> Flags, bool Error = false);
+/// <param name="Sample">O texto que a IA escreveu (narrativa, resposta, comentário), para um humano julgar a escrita.</param>
+public sealed record EvalCaseResult(string Role, string Case, bool Passed, double Seconds, string Detail, IReadOnlyDictionary<string, bool> Flags, bool Error = false, string? Sample = null);
 
 /// <param name="EstimatedTokens">Sem a contagem do Ollama, os tokens são estimados por caracteres / 4.</param>
 public sealed record SpeedProbe(double FirstTokenSeconds, double TokensPerSecond, bool EstimatedTokens);
@@ -33,6 +34,18 @@ public sealed record ModelEvalReport(string Model, IReadOnlyList<EvalCaseResult>
         var answered = For(role).Where(c => !c.Error).ToList();
         return answered.Count == 0 ? 0 : (double)answered.Count(c => c.Passed) / answered.Count;
     }
+
+    /// <summary>Acerto médio dos papéis avaliados (cada papel pesa igual), de 0 a 1.</summary>
+    public double Quality => Roles().Select(PassRate).DefaultIfEmpty(0).Average();
+
+    /// <summary>Tempo médio por chamada: média das medianas de cada papel, só com os casos respondidos.</summary>
+    public double MedianSeconds => Roles()
+        .Select(role => For(role).Where(c => !c.Error).Select(c => c.Seconds).Order().ToList())
+        .Where(times => times.Count > 0)
+        .Select(times => times[times.Count / 2])
+        .DefaultIfEmpty(0).Average();
+
+    private IEnumerable<string> Roles() => Cases.Select(c => c.Role).Distinct(StringComparer.Ordinal);
 
     /// <summary>Sem erro do Ollama e com a velocidade medida: só então o resultado serve para decidir.</summary>
     public bool Complete => Error is null && Errors == 0 && Speed is not null;
@@ -221,8 +234,10 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
             var adherent = tracks.Contains(seed.Track);
             var adjustments = result.Adjustments.Count == 0 ? "" : $"; ajustes da validação: {string.Join(" | ", result.Adjustments.Take(3))}";
             var detail = $"{seed.Id}{(error is null ? "" : $"; não monta: {error}")}{adjustments}; narrativa {(result.Delta.Narrative is null ? "descartada" : "ok")}";
+            var sample = result.Delta.Narrative is null ? null : $"{result.Delta.Narrative}\n\nMotivo da escolha: {result.Delta.Reason}";
             results.Add(Done(Case(PromptRoles.Personalizer, context, error is null && adherent, seconds, detail,
-                new() { ["delta-valido"] = true, ["monta"] = error is null, ["aderente"] = adherent })));
+                new() { ["delta-valido"] = true, ["monta"] = error is null, ["aderente"] = adherent, ["sem-ajuste"] = result.Adjustments.Count == 0 }) with
+            { Sample = sample }));
         }
 
         return results;
@@ -263,11 +278,14 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
                     : (false, "variável do caso não existe na semente"),
                 "no-spoiler" => Spoilers(spec).FirstOrDefault(s => normalized.Contains(AiText.Normalize(s), StringComparison.Ordinal)) is { } leaked
                     ? (false, $"revelou \"{leaked}\"")
-                    : (true, "não revelou referência nem cenários ocultos"),
+                    : Strings(c["forbid"]).FirstOrDefault(f => normalized.Contains(AiText.Normalize(f), StringComparison.Ordinal)) is { } denied
+                        ? (false, $"disse \"{denied}\", mas os cenários ocultos existem")
+                        : (true, "não revelou referência nem cenários ocultos"),
                 _ => (Admissions.Any(a => normalized.Contains(a, StringComparison.Ordinal)), "esperava admitir que o enunciado não define"),
             };
             results.Add(Done(Case(PromptRoles.Interviewer, $"{seedId}: {question}", passed, seconds, $"{detail} · \"{AiText.Clean(answer.Text, 140)}\"",
-                new() { [expect] = passed })));
+                new() { [expect] = passed }) with
+            { Sample = answer.Text }));
         }
 
         return results;
@@ -301,9 +319,12 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
             var top = result.Review.Improvements.FirstOrDefault()?.Title ?? "";
             var text = narrative is null ? "" : AiText.Normalize(string.Join(' ', narrative.Paragraphs));
             var mentionsTop = top.Length > 0 && AiText.Normalize(top).Split(' ').Where(w => w.Length >= 5).Any(w => text.Contains(w, StringComparison.Ordinal));
-            results.Add(Done(Case(PromptRoles.Narrator, $"{seedId} (nota {result.Score.FinalScore})", narrative is not null, seconds,
-                narrative is null ? $"narrativa descartada depois de duas tentativas{(why is null ? "" : $": {why}")}" : $"cita o ponto de maior impacto: {(mentionsTop ? "sim" : "não")} ({top})",
-                new() { ["aceita"] = narrative is not null, ["cita-o-principal"] = mentionsTop })));
+            var detail = narrative is null
+                ? $"narrativa descartada depois de duas tentativas{(why is null ? "" : $": {why}")}"
+                : $"cita o ponto de maior impacto: {(mentionsTop ? "sim" : "não")} ({top}){(why is null ? "" : $"; só passou na 2ª tentativa: a 1ª foi rejeitada ({why})")}";
+            results.Add(Done(Case(PromptRoles.Narrator, $"{seedId} (nota {result.Score.FinalScore})", narrative is not null, seconds, detail,
+                new() { ["aceita"] = narrative is not null, ["cita-o-principal"] = mentionsTop }) with
+            { Sample = narrative is null ? null : string.Join("\n\n", narrative.Paragraphs) }));
         }
 
         return results;
@@ -484,15 +505,7 @@ public static class AiEvalReport
                 $"**Dados incompletos (?)** em {string.Join(", ", incomplete.Select(r => r.Model))}: há casos com erro ao falar com o Ollama ou a velocidade não foi medida. Os casos com erro ficam fora das porcentagens. Rode de novo antes de decidir.");
         }
 
-        var complete = reports.Where(r => r.Complete).ToList();
-        if (complete.Count > 0)
-        {
-            var best = complete.Where(r => r.MeetsS4).OrderByDescending(r => r.Cases.Count(c => c.Passed)).FirstOrDefault();
-            text.AppendLine();
-            text.AppendLine(best is null
-                ? "Nenhum modelo com dados completos passou nos critérios: o app continua funcionando sem IA (modo none)."
-                : $"Sugestão de modelo padrão: **{best.Model}** (use em `Ai:Ollama:Model`).");
-        }
+        AppendRecommendation(text, reports);
 
         foreach (var r in reports.Where(r => r.Error is null))
         {
@@ -525,9 +538,80 @@ public static class AiEvalReport
                 foreach (var c in cases)
                     text.AppendLine(CultureInfo.InvariantCulture, $"| {Escape(c.Case)} | {(c.Error ? "erro" : c.Passed ? "✓" : "✗")} | {c.Seconds.ToString("0.0", PtBr)} s | {Escape(c.Detail)} |");
             }
+
+            AppendSamples(text, r);
         }
 
         return text.ToString();
+    }
+
+    /// <summary>
+    /// Os números dizem se o modelo acertou, não se escreve bem em português: aqui está o que a IA escreveu, para
+    /// você ler (narrativa do desafio, comentário do mentor e respostas do entrevistador).
+    /// </summary>
+    private static void AppendSamples(StringBuilder text, ModelEvalReport report)
+    {
+        var groups = new (string Role, string Title, int Max)[]
+        {
+            (PromptRoles.Personalizer, "Narrativa do desafio (personalizador)", 3),
+            (PromptRoles.Narrator, "Comentário do mentor (narrador)", 3),
+            (PromptRoles.Interviewer, "Respostas do entrevistador", 4),
+        };
+        var any = false;
+        foreach (var (role, title, max) in groups)
+        {
+            var samples = report.For(role).Where(c => c.Sample is not null).Take(max).ToList();
+            if (samples.Count == 0) continue;
+            if (!any)
+            {
+                text.AppendLine();
+                text.AppendLine("### O que a IA escreveu");
+                any = true;
+            }
+
+            text.AppendLine();
+            text.AppendLine(CultureInfo.InvariantCulture, $"**{title}**");
+            foreach (var c in samples)
+            {
+                text.AppendLine();
+                text.AppendLine(CultureInfo.InvariantCulture, $"*{AiText.Clean(c.Case, 120)}*");
+                text.AppendLine();
+                foreach (var line in c.Sample!.Split('\n')) text.AppendLine(line.Length == 0 ? ">" : $"> {line}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Entre os que passam no S4: se o mais preciso também é o mais rápido, é a sugestão; se não, mostra a troca
+    /// (precisão × velocidade) em vez de esconder a decisão num critério arbitrário.
+    /// </summary>
+    private static void AppendRecommendation(StringBuilder text, IReadOnlyList<ModelEvalReport> reports)
+    {
+        var complete = reports.Where(r => r.Complete).ToList();
+        if (complete.Count == 0) return;
+        var passing = complete.Where(r => r.MeetsS4).ToList();
+        text.AppendLine();
+        if (passing.Count == 0)
+        {
+            text.AppendLine("Nenhum modelo com dados completos passou nos critérios: o app continua funcionando sem IA (modo none).");
+            return;
+        }
+
+        var accurate = passing.OrderByDescending(r => r.Quality).ThenBy(r => r.MedianSeconds).First();
+        var fast = passing.OrderBy(r => r.MedianSeconds).ThenByDescending(r => r.Quality).First();
+        if (passing.Count == 1 || accurate == fast)
+        {
+            text.AppendLine(CultureInfo.InvariantCulture, $"Sugestão de modelo padrão: **{accurate.Model}** (use em `Ai:Ollama:Model`): o mais preciso e o mais rápido dos que passam no S4.");
+            return;
+        }
+
+        string Line(ModelEvalReport r) => $"{(r.Quality * 100).ToString("0", PtBr)}% de acerto médio nos papéis e {r.MedianSeconds.ToString("0.0", PtBr)} s por chamada";
+        text.AppendLine("Mais de um modelo passa no S4, com uma troca entre precisão e velocidade:");
+        text.AppendLine();
+        text.AppendLine(CultureInfo.InvariantCulture, $"- Mais preciso: **{accurate.Model}** ({Line(accurate)}).");
+        text.AppendLine(CultureInfo.InvariantCulture, $"- Mais rápido: **{fast.Model}** ({Line(fast)}; {(accurate.MedianSeconds / Math.Max(0.001, fast.MedianSeconds)).ToString("0.0", PtBr)}× mais rápido).");
+        text.AppendLine();
+        text.AppendLine("Leia a seção \"O que a IA escreveu\" de cada um e escolha pelo equilíbrio (use em `Ai:Ollama:Model`).");
     }
 
     private static string Cell(ModelEvalReport report, string role)
