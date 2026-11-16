@@ -1,6 +1,8 @@
+using Lab.Ai;
 using Lab.Content;
 using Lab.Modules.Challenges;
 using Lab.Modules.Challenges.Contracts;
+using Lab.Modules.Conversations;
 using Lab.Modules.Design;
 using Lab.Modules.Design.Contracts;
 using Lab.Modules.Evaluation;
@@ -58,6 +60,18 @@ public static class LabModules
         services.AddScoped<IJobHandler, EvaluationJobHandler>();
         services.AddScoped<IGamificationQueries, GamificationQueries>();
         services.AddScoped<IOutboxHandler, EvaluationCompletedHandler>();
+        services.AddScoped<IChallengeLibrary>(sp => sp.GetRequiredService<ChallengeService>());
+        services.AddScoped<ConversationService>();
+        services.AddScoped<IJobHandler, NarrativeJobHandler>();
+
+        // IA opcional (spec 06): sem Ollama tudo continua funcionando no modo determinístico.
+        var ai = configuration.GetSection("Ai").Get<AiOptions>() ?? new AiOptions();
+        services.AddSingleton(ai);
+        services.AddSingleton(sp => new AiRuntime(ai, new HttpClient(), sp.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(sp => PromptLibrary.Load(Path.Combine(sp.GetRequiredService<LabContent>().Bundle.Root, "prompts")));
+        services.AddSingleton<IChallengePersonalizer, ChallengePersonalizer>();
+        services.AddSingleton<IInterviewer, Interviewer>();
+        services.AddSingleton<IReviewNarrator, ReviewNarrator>();
         return services;
     }
 
@@ -68,6 +82,7 @@ public static class LabModules
         app.MapDesign();
         app.MapEvaluation();
         app.MapGamification();
+        app.MapConversations();
         app.MapSystem();
         app.MapHub<LabHub>("/hubs/lab");
         return app;

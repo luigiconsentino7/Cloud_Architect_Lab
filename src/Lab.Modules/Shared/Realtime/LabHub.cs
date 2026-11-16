@@ -24,6 +24,14 @@ public sealed record LevelUpEvent(int Level, string Title);
 
 public sealed record AchievementUnlockedEvent(string Code, string Title);
 
+/// <summary>Pedaço da resposta do entrevistador enquanto o modelo local escreve.</summary>
+public sealed record ChatDeltaEvent(Guid ConversationId, string Delta);
+
+public sealed record ChatCompletedEvent(Guid ConversationId, Guid MessageId);
+
+/// <param name="Status"><c>ready</c>, <c>rejected</c>, <c>unavailable</c> ou <c>failed</c>.</param>
+public sealed record NarrativeReadyEvent(Guid EvaluationId, Guid AttemptId, string Status);
+
 /// <summary>Eventos de tempo real para o frontend. Falhas de envio nunca derrubam o fluxo que as gerou.</summary>
 public interface ILabNotifier
 {
@@ -38,6 +46,12 @@ public interface ILabNotifier
     Task LevelUp(LevelUpEvent e);
 
     Task AchievementUnlocked(AchievementUnlockedEvent e);
+
+    Task ChatDelta(ChatDeltaEvent e);
+
+    Task ChatCompleted(ChatCompletedEvent e);
+
+    Task NarrativeReady(NarrativeReadyEvent e);
 }
 
 public sealed class HubNotifier(IHubContext<LabHub> hub) : ILabNotifier
@@ -53,6 +67,12 @@ public sealed class HubNotifier(IHubContext<LabHub> hub) : ILabNotifier
     public Task LevelUp(LevelUpEvent e) => Safe(hub.Clients.All.SendAsync("LevelUp", e));
 
     public Task AchievementUnlocked(AchievementUnlockedEvent e) => Safe(hub.Clients.All.SendAsync("AchievementUnlocked", e));
+
+    public Task ChatDelta(ChatDeltaEvent e) => Safe(hub.Clients.All.SendAsync("ChatDelta", e));
+
+    public Task ChatCompleted(ChatCompletedEvent e) => Safe(hub.Clients.All.SendAsync("ChatCompleted", e));
+
+    public Task NarrativeReady(NarrativeReadyEvent e) => Safe(hub.Clients.All.SendAsync("NarrativeReady", e));
 
     private static async Task Safe(Task send)
     {

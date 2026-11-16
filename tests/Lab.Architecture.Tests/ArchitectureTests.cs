@@ -19,7 +19,7 @@ public sealed class ArchitectureTests
 
     private static readonly string[] EngineNamespaces = ["Lab.Ir", "Lab.Rules", "Lab.Simulation", "Lab.Cost", "Lab.Scoring", "Lab.Pipeline"];
 
-    private static readonly string[] Modules = ["Profile", "Challenges", "Design", "Evaluation", "Gamification"];
+    private static readonly string[] Modules = ["Profile", "Challenges", "Design", "Evaluation", "Gamification", "Conversations"];
 
     // O builder fluente é mutável: cada regra começa de um GivenTypes novo.
     private static GivenTypesConjunction Engine() =>

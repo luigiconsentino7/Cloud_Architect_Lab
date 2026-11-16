@@ -17,6 +17,10 @@ public sealed class EvaluationEntity
     public int? FinalScore { get; set; }
     public string? Rank { get; set; }
     public string? Error { get; set; }
+
+    /// <summary>Narrativa da revisão escrita pela IA local (<see cref="NarrativeState"/>), quando ligada.</summary>
+    public string? NarrativeJson { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
@@ -27,6 +31,16 @@ public static class EvaluationStatus
     public const string Queued = "queued";
     public const string Running = "running";
     public const string Completed = "completed";
+    public const string Failed = "failed";
+}
+
+/// <summary>Estado da narrativa: <c>pending</c>, <c>ready</c>, <c>rejected</c> (citou o que a revisão não tem), <c>unavailable</c> ou <c>failed</c>.</summary>
+public sealed record NarrativeState(string Status, IReadOnlyList<string> Paragraphs, string? Model, string? PromptVersion, string? Detail, DateTime UpdatedAt)
+{
+    public const string Pending = "pending";
+    public const string Ready = "ready";
+    public const string Rejected = "rejected";
+    public const string Unavailable = "unavailable";
     public const string Failed = "failed";
 }
 

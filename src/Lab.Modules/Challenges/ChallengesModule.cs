@@ -60,6 +60,11 @@ public sealed record ChallengePublicView
     public string Status { get; init; } = ChallengeStatus.Ready;
     public DateTime CreatedAt { get; init; }
 
+    /// <summary>Modelo de IA local que personalizou o enunciado (nulo quando veio direto da biblioteca).</summary>
+    public string? PersonalizedBy { get; init; }
+
+    public string? PersonalizationNote { get; init; }
+
     public static ChallengePublicView From(Guid id, ChallengeSpec spec, string status, DateTime createdAt)
     {
         var publicScenarios = spec.TestPlan.Scenarios.Where(s => s.Visibility == Visibility.Public).ToList();
@@ -162,18 +167,44 @@ public sealed record CreateChallengeRequest(
 
 public sealed record ChallengeSummary(Guid Id, string SeedId, string Title, string Track, CloudProvider Provider, Difficulty Difficulty, GameMode Mode, DateTime CreatedAt);
 
-public sealed class ChallengeService(LabDbContext db, LabContent content, IProfileQueries profiles, TimeProvider clock) : IChallengeQueries
+public sealed class ChallengeService(LabDbContext db, LabContent content, IProfileQueries profiles, TimeProvider clock) : IChallengeQueries, IChallengeLibrary
 {
-    public async Task<ChallengeEntity> CreateAsync(CreateChallengeRequest request, CancellationToken cancellationToken)
+    public Task<ChallengeEntity> CreateAsync(CreateChallengeRequest request, CancellationToken cancellationToken) =>
+        CreateEntityAsync(
+            new ChallengeOrder(request.SeedId, request.Provider, request.Difficulty, request.Mode) { Variables = request.Variables, Twists = request.Twists ?? [] },
+            request.RandomVariation && request.Variables is null ? Random.Shared.NextInt64(1, long.MaxValue) : null,
+            cancellationToken);
+
+    /// <summary>Pedido de outro módulo (ex.: o chat): as variáveis que o delta não fixou são sorteadas na faixa.</summary>
+    async Task<ChallengeInfo> IChallengeLibrary.CreateAsync(ChallengeOrder order, CancellationToken cancellationToken)
     {
-        var seed = content.FindSeed(request.SeedId) ?? throw new SeedException($"Semente '{request.SeedId}' não existe.");
-        var difficulty = request.Difficulty is { } d ? Lab.Content.SeedLoader.ParseDifficulty(d)
+        var c = await CreateEntityAsync(order, Random.Shared.NextInt64(1, long.MaxValue), cancellationToken);
+        return new ChallengeInfo(c.Id, c.ProfileId, c.SeedId, c.SeedVersion, c.Title, c.Provider, c.Difficulty, c.Mode);
+    }
+
+    public IReadOnlyList<SeedSuggestion> Search(string? query, Difficulty? difficulty, int limit) =>
+        LibrarySearch.Search(content.Seeds, query, difficulty, null).Take(limit)
+            .Select(i => new SeedSuggestion(i.SeedId, i.Title, i.Summary, i.Track, i.Tags, i.MatchedTerms))
+            .ToList();
+
+    public async Task<ChallengeBrief?> BriefAsync(Guid challengeId, CancellationToken cancellationToken = default)
+    {
+        var json = await db.Challenges.Where(c => c.Id == challengeId).Select(c => c.PublicJson).FirstOrDefaultAsync(cancellationToken);
+        if (json is null) return null;
+        var view = Json.Deserialize<ChallengePublicView>(json);
+        return new ChallengeBrief(view.Id, view.Title, ChallengeStatement.Write(view), view.Clarifications);
+    }
+
+    private async Task<ChallengeEntity> CreateEntityAsync(ChallengeOrder order, long? variationSeed, CancellationToken cancellationToken)
+    {
+        var seed = content.FindSeed(order.SeedId) ?? throw new SeedException($"Semente '{order.SeedId}' não existe.");
+        var difficulty = order.Difficulty is { } d ? Lab.Content.SeedLoader.ParseDifficulty(d)
             : seed.Difficulties.Contains(Difficulty.Senior) ? Difficulty.Senior : seed.Difficulties.FirstOrDefault(Difficulty.Senior);
-        var mode = request.Mode is { } m && Enum.TryParse<GameMode>(m, ignoreCase: true, out var parsed) ? parsed : GameMode.Treino;
+        var mode = order.Mode is { } m && Enum.TryParse<GameMode>(m, ignoreCase: true, out var parsed) ? parsed : GameMode.Treino;
         CloudProvider provider;
         try
         {
-            provider = CloudProviders.Parse(request.Provider);
+            provider = CloudProviders.Parse(order.Provider);
         }
         catch (ArgumentException ex)
         {
@@ -187,14 +218,19 @@ public sealed class ChallengeService(LabDbContext db, LabContent content, IProfi
             Provider = provider,
             Difficulty = difficulty,
             Mode = mode,
-            Twists = request.Twists ?? [],
-            Variables = request.Variables,
-            VariationSeed = request.RandomVariation && request.Variables is null ? Random.Shared.NextInt64(1, long.MaxValue) : null,
+            Twists = order.Twists,
+            Variables = order.Variables,
+            VariationSeed = variationSeed,
             ChallengeId = $"chl_{id:N}",
         }, content.Catalog);
 
         var now = clock.GetUtcNow().UtcDateTime;
-        var spec = instance.Challenge;
+        var spec = Personalize(instance.Challenge, order);
+        var view = ChallengePublicView.From(id, spec, ChallengeStatus.Ready, now) with
+        {
+            PersonalizedBy = order.PersonalizedBy,
+            PersonalizationNote = order.PersonalizationNote,
+        };
         var entity = new ChallengeEntity
         {
             Id = id,
@@ -206,8 +242,9 @@ public sealed class ChallengeService(LabDbContext db, LabContent content, IProfi
             Difficulty = difficulty.ToString().ToLowerInvariant(),
             Mode = mode.ToString().ToLowerInvariant(),
             VariationJson = Json.Serialize(new { variables = spec.Variables, twists = spec.Twists }),
+            PersonalizationJson = order.PersonalizationJson,
             SpecJson = Json.Serialize(spec),
-            PublicJson = Json.Serialize(ChallengePublicView.From(id, spec, ChallengeStatus.Ready, now)),
+            PublicJson = Json.Serialize(view),
             MasterSeed = spec.MasterSeed,
             ReferenceSceneJson = instance.ReferenceScene is null ? null : Json.Serialize(new { scene = instance.ReferenceScene, flows = instance.ReferenceFlows }),
             Status = ChallengeStatus.Ready,
@@ -216,6 +253,17 @@ public sealed class ChallengeService(LabDbContext db, LabContent content, IProfi
         db.Challenges.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
         return entity;
+    }
+
+    /// <summary>A narrativa da IA entra antes do enunciado curado (que mantém os números); os esclarecimentos extras, no fim.</summary>
+    private static ChallengeSpec Personalize(ChallengeSpec spec, ChallengeOrder order)
+    {
+        if (string.IsNullOrWhiteSpace(order.Narrative) && order.ExtraClarifications.Count == 0) return spec;
+        return spec with
+        {
+            Narrative = string.IsNullOrWhiteSpace(order.Narrative) ? spec.Narrative : $"{order.Narrative.Trim()}\n\n{spec.Narrative}",
+            Clarifications = [.. spec.Clarifications, .. order.ExtraClarifications],
+        };
     }
 
     public async Task<ChallengeInfo?> FindAsync(Guid challengeId, CancellationToken cancellationToken = default) =>

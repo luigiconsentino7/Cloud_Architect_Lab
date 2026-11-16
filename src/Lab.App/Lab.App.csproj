@@ -17,5 +17,6 @@
   <!-- O conteúdo versionado (catálogo, sementes, textos das regras) vai junto do executável. -->
   <ItemGroup>
     <None Include="../../content/**/*.yaml" LinkBase="content" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../content/prompts/**/*.md" LinkBase="content/prompts" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

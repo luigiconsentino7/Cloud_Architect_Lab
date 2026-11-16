@@ -1,4 +1,5 @@
 using Lab.Modules.Challenges;
+using Lab.Modules.Conversations;
 using Lab.Modules.Design;
 using Lab.Modules.Evaluation;
 using Lab.Modules.Gamification;
@@ -25,6 +26,8 @@ public sealed class LabDbContext(DbContextOptions<LabDbContext> options) : DbCon
     public DbSet<CompetencyRatingEntity> CompetencyRatings => Set<CompetencyRatingEntity>();
     public DbSet<UserAchievementEntity> UserAchievements => Set<UserAchievementEntity>();
     public DbSet<ChallengeStatsEntity> ChallengeStats => Set<ChallengeStatsEntity>();
+    public DbSet<ConversationEntity> Conversations => Set<ConversationEntity>();
+    public DbSet<ConversationMessageEntity> ConversationMessages => Set<ConversationMessageEntity>();
     public DbSet<JobEntity> Jobs => Set<JobEntity>();
     public DbSet<OutboxMessageEntity> Outbox => Set<OutboxMessageEntity>();
 
@@ -110,6 +113,22 @@ public sealed class LabDbContext(DbContextOptions<LabDbContext> options) : DbCon
         {
             e.ToTable("gam_challenge_stats");
             e.HasKey(x => new { x.ProfileId, x.ChallengeId });
+        });
+
+        model.Entity<ConversationEntity>(e =>
+        {
+            e.ToTable("conv_conversations");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.Kind, x.UpdatedAt });
+            e.HasIndex(x => x.ChallengeId);
+            e.Property(x => x.Title).HasMaxLength(200);
+        });
+
+        model.Entity<ConversationMessageEntity>(e =>
+        {
+            e.ToTable("conv_messages");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.ConversationId, x.Number }).IsUnique();
         });
 
         model.Entity<JobEntity>(e =>

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Lab.Ai;
 using Lab.Ir;
 using Lab.Ir.Challenges;
 using Lab.Ir.Scene;
@@ -54,6 +55,7 @@ public sealed class EvaluationJobHandler(
     ILabNotifier notifier,
     OutboxSignal outbox,
     LabOptions options,
+    AiRuntime ai,
     TimeProvider clock) : IJobHandler
 {
     public string Type => EvaluationScheduler.JobType;
@@ -118,6 +120,9 @@ public sealed class EvaluationJobHandler(
         var result = await run;
         Store(evaluation, result);
         OutboxWriter.Add(db, clock, EvaluationCompleted.Type, Facts(evaluation, attempt, challenge, spec, result));
+
+        // Com a IA local ligada, a narrativa da revisão vem depois, num job próprio: a nota não espera por ela.
+        if (submission && (await ai.StatusAsync(cancellationToken)).Mode == AiMode.Ollama) NarrativeScheduling.Schedule(db, clock, evaluation);
         if (submission) await attempts.SetStatusAsync(attempt.Id, "evaluated", cancellationToken); // salva tudo junto
         else await db.SaveChangesAsync(cancellationToken);
 
@@ -277,7 +282,8 @@ public sealed record EvaluationView(
     DateTime CreatedAt,
     DateTime? StartedAt,
     DateTime? CompletedAt,
-    JsonNode? Result);
+    JsonNode? Result,
+    NarrativeState? Narrative = null);
 
 public sealed record HistoryItem(Guid EvaluationId, Guid AttemptId, Guid ChallengeId, string Title, string Kind, string Status, int? FinalScore, string? Rank, DateTime CreatedAt, DateTime? CompletedAt);
 
@@ -291,7 +297,27 @@ public static class EvaluationEndpoints
         {
             var e = await db.Evaluations.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
             return e is null ? Results.NotFound() : Results.Ok(new EvaluationView(e.Id, e.AttemptId, e.ChallengeId, e.Kind, e.Status, e.Stage, e.Percent,
-                e.Detail, e.FinalScore, e.Rank, e.Error, e.CreatedAt, e.StartedAt, e.CompletedAt, e.ResultJson is null ? null : JsonNode.Parse(e.ResultJson)));
+                e.Detail, e.FinalScore, e.Rank, e.Error, e.CreatedAt, e.StartedAt, e.CompletedAt, e.ResultJson is null ? null : JsonNode.Parse(e.ResultJson),
+                NarrativeScheduling.Read(e)));
+        });
+
+        // Pede (de novo) a narrativa da IA local — ex.: o Ollama foi aberto depois da submissão.
+        group.MapPost("/{id:guid}/narrative", async (Guid id, LabDbContext db, AiRuntime ai, JobSignal jobs, TimeProvider clock, CancellationToken ct) =>
+        {
+            var e = await db.Evaluations.FirstOrDefaultAsync(x => x.Id == id, ct);
+            if (e is null) return Results.NotFound();
+            if (e.Kind != EvaluationKind.Submission || e.Status != EvaluationStatus.Completed)
+                return Results.Problem(detail: "A narrativa é escrita sobre a revisão de uma submissão já avaliada.", statusCode: StatusCodes.Status409Conflict);
+            var status = await ai.StatusAsync(ct);
+            if (status.Mode != AiMode.Ollama) return Results.Problem(detail: status.Detail, statusCode: StatusCodes.Status409Conflict, title: "IA local indisponível");
+            if (NarrativeScheduling.Read(e)?.Status != NarrativeState.Pending)
+            {
+                NarrativeScheduling.Schedule(db, clock, e);
+                await db.SaveChangesAsync(ct);
+                jobs.Notify();
+            }
+
+            return Results.Accepted($"/api/evaluations/{id}", NarrativeScheduling.Read(e));
         });
 
         group.MapGet("", async (LabDbContext db, IChallengeQueries challenges, int? limit, CancellationToken ct) =>

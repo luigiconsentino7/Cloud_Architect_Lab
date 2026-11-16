@@ -15,6 +15,7 @@
     <Project Path="src/Engine/Lab.Simulation/Lab.Simulation.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Lab.Ai.Tests/Lab.Ai.Tests.csproj" />
     <Project Path="tests/Lab.App.Tests/Lab.App.Tests.csproj" />
     <Project Path="tests/Lab.Architecture.Tests/Lab.Architecture.Tests.csproj" />
     <Project Path="tests/Lab.Content.Tests/Lab.Content.Tests.csproj" />

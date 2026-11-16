@@ -30,6 +30,41 @@ namespace Lab.Modules.Challenges.Contracts
 
         Task SaveReferenceCostAsync(Guid challengeId, double cost, CancellationToken cancellationToken = default);
     }
+
+    public sealed record SeedSuggestion(string SeedId, string Title, string Summary, string Track, IReadOnlyList<string> Tags, IReadOnlyList<string> MatchedTerms);
+
+    /// <summary>Pedido de desafio a partir de uma semente; a personalização (da IA) já chega validada como delta.</summary>
+    public sealed record ChallengeOrder(string SeedId, string Provider, string? Difficulty, string? Mode)
+    {
+        public IReadOnlyDictionary<string, double>? Variables { get; init; }
+        public IReadOnlyList<string> Twists { get; init; } = [];
+
+        /// <summary>Parágrafo de ambientação que entra antes do enunciado curado.</summary>
+        public string? Narrative { get; init; }
+
+        public IReadOnlyList<ClarificationSpec> ExtraClarifications { get; init; } = [];
+
+        /// <summary>Modelo que personalizou (aparece no enunciado como selo).</summary>
+        public string? PersonalizedBy { get; init; }
+
+        public string? PersonalizationNote { get; init; }
+
+        /// <summary>Manifesto da personalização (delta, modelo, versão do prompt, ajustes da validação).</summary>
+        public string? PersonalizationJson { get; init; }
+    }
+
+    /// <summary>Parte pública do desafio em texto, para o entrevistador: sem cenários ocultos e sem referência.</summary>
+    public sealed record ChallengeBrief(Guid Id, string Title, string Statement, IReadOnlyList<ClarificationSpec> Clarifications);
+
+    public interface IChallengeLibrary
+    {
+        IReadOnlyList<SeedSuggestion> Search(string? query, Difficulty? difficulty, int limit);
+
+        /// <remarks>Lança <c>SeedException</c> quando o pedido não forma um desafio válido.</remarks>
+        Task<ChallengeInfo> CreateAsync(ChallengeOrder order, CancellationToken cancellationToken = default);
+
+        Task<ChallengeBrief?> BriefAsync(Guid challengeId, CancellationToken cancellationToken = default);
+    }
 }
 
 namespace Lab.Modules.Design.Contracts

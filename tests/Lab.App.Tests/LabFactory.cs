@@ -21,6 +21,10 @@ public sealed class LabFactory : WebApplicationFactory<Program>
         builder.UseSetting("Lab:DataDirectory", DataDirectory);
         builder.UseSetting("Lab:EventBudget", "3000000");
         builder.UseSetting("Lab:MaxParallelism", "2");
+
+        // Ninguém escuta aqui: sem um cliente falso injetado, os testes rodam no modo sem IA.
+        builder.UseSetting("Ai:Ollama:Endpoint", "http://127.0.0.1:9");
+        builder.UseSetting("Ai:Ollama:Model", "modelo-teste");
     }
 
     /// <summary>Cliente como o frontend: com o header que as requisições de escrita exigem.</summary>

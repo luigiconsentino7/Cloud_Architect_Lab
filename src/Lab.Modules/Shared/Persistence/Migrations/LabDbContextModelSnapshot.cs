@@ -87,6 +87,86 @@ namespace Lab.Modules.Shared.Persistence.Migrations
                     b.ToTable("chl_challenges", (string)null);
                 });
 
+            modelBuilder.Entity("Lab.Modules.Conversations.ConversationEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ChallengeId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChallengeId");
+
+                    b.HasIndex("Kind", "UpdatedAt");
+
+                    b.ToTable("conv_conversations", (string)null);
+                });
+
+            modelBuilder.Entity("Lab.Modules.Conversations.ConversationMessageEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Model")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PayloadJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PromptVersion")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("conv_messages", (string)null);
+                });
+
             modelBuilder.Entity("Lab.Modules.Design.AttemptEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -225,6 +305,9 @@ namespace Lab.Modules.Shared.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ManifestJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NarrativeJson")
                         .HasColumnType("TEXT");
 
                     b.Property<double>("Percent")
