@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnDestroy, computed, effect, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ApiService, problemMessage } from '../core/api.service';
 import { dimensionName, fmt, metricName, rankClass, severityName } from '../core/format';
@@ -36,6 +36,8 @@ export class ResultComponent implements OnDestroy {
   protected readonly series = signal<TimeSeries | null>(null);
   protected readonly selectedScenario = signal<string | null>(null);
   protected readonly expanded = signal<Set<string>>(new Set());
+  protected readonly aiOn = signal(false);
+  protected readonly requesting = signal(false);
 
   protected readonly result = computed(() => this.evaluation()?.result ?? null);
   protected readonly running = computed(() => {
@@ -61,6 +63,7 @@ export class ResultComponent implements OnDestroy {
   protected readonly charts = computed(() => this.buildCharts(this.series()));
 
   private poll?: ReturnType<typeof setInterval>;
+  private narrativePolling = false;
 
   constructor() {
     effect(() => {
@@ -71,6 +74,47 @@ export class ResultComponent implements OnDestroy {
       const done = this.realtime.completed();
       if (done && done.evaluationId === this.evaluation()?.id) void this.load(done.evaluationId);
     });
+    effect(() => {
+      const ready = this.realtime.narrativeReady();
+      if (ready && ready.evaluationId === untracked(() => this.evaluation()?.id)) void this.reloadNarrative(ready.evaluationId);
+    });
+    void this.api.aiStatus().then((s) => this.aiOn.set(s.mode === 'ollama')).catch(() => undefined);
+  }
+
+  protected async requestNarrative(): Promise<void> {
+    const e = this.evaluation();
+    if (!e) return;
+    this.requesting.set(true);
+    try {
+      const narrative = await this.api.requestNarrative(e.id);
+      this.evaluation.update((current) => (current ? { ...current, narrative } : current));
+      void this.realtime.start();
+      this.waitForNarrative(e.id);
+    } catch (error) {
+      this.error.set(problemMessage(error));
+    } finally {
+      this.requesting.set(false);
+    }
+  }
+
+  /** Sem o evento de tempo real, consulta a cada 3 s enquanto a narrativa estiver pendente. */
+  private waitForNarrative(id: string): void {
+    if (this.narrativePolling) return;
+    this.narrativePolling = true;
+    const check = async (): Promise<void> => {
+      if (this.evaluation()?.narrative?.status !== 'pending' || this.evaluation()?.id !== id) {
+        this.narrativePolling = false;
+        return;
+      }
+      await this.reloadNarrative(id);
+      setTimeout(() => void check(), 3000);
+    };
+    setTimeout(() => void check(), 3000);
+  }
+
+  private async reloadNarrative(id: string): Promise<void> {
+    const fresh = await this.api.evaluation(id).catch(() => null);
+    if (fresh) this.evaluation.update((current) => (current && current.id === id ? { ...current, narrative: fresh.narrative } : current));
   }
 
   ngOnDestroy(): void {
@@ -130,6 +174,7 @@ export class ResultComponent implements OnDestroy {
       } else {
         clearInterval(this.poll);
         this.poll = undefined;
+        if (evaluation.narrative?.status === 'pending') this.waitForNarrative(id);
         const first = evaluation.result?.simulation.scenarios[0]?.scenarioId;
         if (first && !this.selectedScenario()) void this.selectScenario(first);
       }

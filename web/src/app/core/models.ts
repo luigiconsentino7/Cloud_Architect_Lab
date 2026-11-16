@@ -144,6 +144,9 @@ export interface Challenge {
   hintCount: number;
   clarifications: { question: string; keywords: string[]; answer: string }[];
   variables: Record<string, number>;
+  /** Modelo da IA local que personalizou o enunciado (ausente quando veio direto da biblioteca). */
+  personalizedBy?: string;
+  personalizationNote?: string;
   createdAt: string;
 }
 
@@ -447,6 +450,17 @@ export interface Evaluation {
   createdAt: string;
   completedAt?: string;
   result?: EvaluationResult;
+  narrative?: NarrativeState;
+}
+
+/** Narrativa da revisão pela IA local: só entra se citar números que estão na revisão determinística. */
+export interface NarrativeState {
+  status: 'pending' | 'ready' | 'rejected' | 'unavailable' | 'failed';
+  paragraphs: string[];
+  model?: string;
+  promptVersion?: string;
+  detail?: string;
+  updatedAt: string;
 }
 
 export interface TimeSeries {
@@ -525,4 +539,63 @@ export interface Palette {
   provider: Provider;
   archetypes: { id: string; displayName: string; category: string }[];
   components: PaletteComponent[];
+}
+
+// ---- IA e conversas ----
+
+export interface AiStatus {
+  mode: 'none' | 'ollama';
+  configuredMode: string;
+  ollamaReachable: boolean;
+  model?: string;
+  endpoint: string;
+  installedModels: string[];
+  detail: string;
+}
+
+export type ConversationKind = 'contexto' | 'entrevista';
+
+export interface SeedSuggestion {
+  seedId: string;
+  title: string;
+  summary: string;
+  track: string;
+  tags: string[];
+  matchedTerms: string[];
+}
+
+/** Dados estruturados de uma resposta: sugestões da biblioteca, desafio montado pela IA ou pergunta curada usada. */
+export type ChatPayload =
+  | { kind: 'suggestions'; provider?: Provider; difficulty?: Difficulty; mode?: GameMode; suggestions: SeedSuggestion[] }
+  | { kind: 'challenge'; challengeId: string; title: string; seedId: string; provider: Provider; difficulty: Difficulty; narrative?: string; twists: string[]; adjustments: string[] }
+  | { kind?: undefined; matchedQuestion?: string };
+
+export interface ChatMessage {
+  id: string;
+  number: number;
+  role: 'user' | 'assistant';
+  text: string;
+  source: 'usuario' | 'ia' | 'curado' | 'biblioteca';
+  model?: string;
+  promptVersion?: string;
+  createdAt: string;
+  payload?: ChatPayload;
+}
+
+export interface Conversation {
+  id: string;
+  kind: ConversationKind;
+  challengeId?: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
+}
+
+export interface ConversationSummary {
+  id: string;
+  kind: ConversationKind;
+  challengeId?: string;
+  title: string;
+  updatedAt: string;
 }

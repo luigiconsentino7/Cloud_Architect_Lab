@@ -53,6 +53,34 @@
       </div>
     </section>
 
+    @if (e.kind === 'submission') {
+      @if (e.narrative; as n) {
+        @if (n.status === 'ready') {
+          <section class="block narrative">
+            <h2>Comentário do mentor <small class="muted">IA local · {{ n.model }}</small></h2>
+            @for (p of n.paragraphs; track $index) {
+              <p>{{ p }}</p>
+            }
+            <p class="muted small">Escrito a partir da revisão abaixo e conferido contra ela: a IA não muda a nota.</p>
+          </section>
+        } @else if (n.status === 'pending') {
+          <section class="block narrative muted">A IA local está escrevendo um comentário sobre esta revisão…</section>
+        } @else {
+          <section class="block narrative muted">
+            {{ n.detail }}
+            @if (aiOn()) {
+              <button type="button" (click)="requestNarrative()" [disabled]="requesting()">Tentar de novo</button>
+            }
+          </section>
+        }
+      } @else if (aiOn()) {
+        <section class="block narrative muted">
+          A IA local está disponível.
+          <button type="button" (click)="requestNarrative()" [disabled]="requesting()">Pedir um comentário sobre esta revisão</button>
+        </section>
+      }
+    }
+
     @if (showReference() && reference(); as ref) {
       <section class="block reference">
         <h2>Solução de referência</h2>

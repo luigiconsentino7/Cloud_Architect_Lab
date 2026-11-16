@@ -2,24 +2,11 @@
 // Uso: com o app rodando (dotnet run --project src/Lab.App) e o `lab` compilado:
 //   BASE_URL=http://localhost:5080 LAB_CLI="dotnet ../src/Lab.Cli/bin/Debug/net10.0/lab.dll" npm run e2e
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
-
-const base = process.env.BASE_URL ?? 'http://localhost:5080';
-const lab = process.env.LAB_CLI ?? 'dotnet ../src/Lab.Cli/bin/Debug/net10.0/lab.dll';
-const shots = process.env.E2E_SCREENSHOTS ?? 'e2e/screenshots';
-const headers = { 'Content-Type': 'application/json', 'X-Lab-Client': 'e2e' };
-mkdirSync(shots, { recursive: true });
-
-async function api(path, init) {
-  const response = await fetch(base + path, init);
-  if (!response.ok) throw new Error(`${init?.method ?? 'GET'} ${path}: ${response.status} ${await response.text()}`);
-  return response.status === 204 ? null : response.json();
-}
+import { api, base, injectReference, shots, waitFor, watchErrors } from './helpers.mjs';
 
 /** Abre um desafio pela interface e injeta a solução de referência como desenho (o "usuário" dos testes). */
-async function openWithReference(page, seedTitle, seedId, difficulty) {
+async function openWithReference(page, seedTitle, difficulty) {
   await page.goto(base + '/');
   await page.selectOption('select[aria-label="Dificuldade"]', difficulty);
   await page.locator('.card', { hasText: seedTitle }).locator('button.primary').click();
@@ -27,30 +14,18 @@ async function openWithReference(page, seedTitle, seedId, difficulty) {
   const challengeId = page.url().split('/').pop();
   await page.waitForSelector('.excalidraw');
   await page.waitForTimeout(2000);
-
-  const challenge = await api(`/api/challenges/${challengeId}`);
-  const attempt = (await api(`/api/challenges/${challengeId}/attempts`)).at(-1);
-  const vars = Object.entries(challenge.variables).map(([k, v]) => `--var=${k}=${v}`).join(' ');
-  const design = JSON.parse(execSync(`${lab} challenge scene ${seedId} --difficulty ${difficulty} --provider ${challenge.provider} ${vars}`).toString());
-  await api(`/api/attempts/${attempt.id}/draft`, { method: 'PUT', headers: { ...headers, 'If-Match': `"${attempt.draftVersion}"` }, body: JSON.stringify({ scene: design.scene }) });
-  await api(`/api/attempts/${attempt.id}/flows`, { method: 'PUT', headers, body: JSON.stringify({ flows: design.flows }) });
-  await page.reload();
-  await page.waitForSelector('.excalidraw');
-  await page.waitForTimeout(1500);
-  return { challengeId, attemptId: attempt.id };
+  const { attemptId } = await injectReference(page, challengeId);
+  return { challengeId, attemptId };
 }
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
-page.on('dialog', (d) => d.accept());
+const errors = watchErrors(page);
 const xpBefore = (await api('/api/me/progress')).summary.totalXp;
 
 try {
   // Jornada 1: validar e submeter → nota, XP e conquista.
-  await openWithReference(page, 'Consulta de chave PIX', 'pix/consulta-dict', 'junior');
+  await openWithReference(page, 'Consulta de chave PIX', 'junior');
   await page.click('button:has-text("Validar")');
   await page.waitForSelector('.problems');
   assert.equal(await page.locator('.problem.error').count(), 0, 'o desenho de referência não pode ter erro de compilação');
@@ -68,7 +43,7 @@ try {
 
   // Jornada 2: simulação de rascunho (Treino) roda só os cenários públicos e não rende XP.
   const xpAfterSubmission = progress.totalXp;
-  await openWithReference(page, 'Envio de PIX da FinBank', 'pix/envio-pix', 'pleno');
+  await openWithReference(page, 'Envio de PIX da FinBank', 'pleno');
   await page.click('button:has-text("Simular")');
   await page.waitForURL(/avaliacoes/);
   await page.waitForSelector('.head .rank', { timeout: 180_000 });
@@ -84,7 +59,25 @@ try {
   await page.waitForSelector('.hint-box');
   assert.match(await page.locator('.hint-box').first().innerText(), /Dica 1/);
 
-  // Jornada 4: perfil mostra nível, competências e histórico.
+  // Jornada 4: chat de contexto (sem IA: busca guiada) → desafio → entrevistador com respostas curadas.
+  await page.goto(base + '/');
+  await page.selectOption('select[aria-label="Dificuldade"]', 'pleno');
+  const before = await page.locator('lab-chat .msg').count();
+  await page.fill('lab-chat textarea', 'Quero treinar envio de Pix com idempotência e retentativas');
+  await page.click('lab-chat button:has-text("Enviar")');
+  await waitFor(async () => page.locator('lab-chat .msg').count(), (n) => n >= before + 2);
+  assert.match(await page.locator('lab-chat .source').last().innerText(), /biblioteca/i, 'sem IA, a resposta vem da biblioteca');
+  await page.screenshot({ path: `${shots}/chat-contexto.png` });
+  await page.locator('lab-chat .msg').last().locator('.suggestion', { hasText: 'Envio de PIX' }).locator('button').click();
+  await page.waitForURL(/desafios\/[0-9a-f-]+/);
+  await page.waitForSelector('.excalidraw');
+  await page.click('nav.tabs button:has-text("Entrevistador")');
+  await page.locator('lab-chat .chip').first().click();
+  await page.waitForSelector('lab-chat .msg:not(.user) .source');
+  assert.match(await page.locator('lab-chat .source').last().innerText(), /curada/i, 'sem IA, o entrevistador usa os esclarecimentos curados');
+  await page.screenshot({ path: `${shots}/entrevistador.png` });
+
+  // Jornada 5: perfil mostra nível, competências e histórico.
   await page.click('a:has-text("Perfil")');
   await page.waitForSelector('.level');
   assert.ok((await page.locator('.competency').count()) > 0, 'competências atualizadas');
@@ -99,13 +92,4 @@ try {
   process.exitCode = 1;
 } finally {
   await browser.close();
-}
-
-async function waitFor(probe, done, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await probe();
-    if (done(value) || Date.now() > deadline) return value;
-    await new Promise((r) => setTimeout(r, 300));
-  }
 }

@@ -68,3 +68,9 @@ h3 { font-size: 14px; margin: 0 0 4px; }
 .cost .value { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .reference .ref-canvas { height: 460px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin: 10px 0; }
+
+.narrative { border-left: 3px solid var(--accent); }
+.narrative h2 small { font-weight: 400; font-size: 12px; }
+.narrative p { line-height: 1.55; }
+.narrative button { margin-left: 8px; }
+.small { font-size: 12px; }

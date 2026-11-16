@@ -108,10 +108,18 @@ public sealed record ChallengePublicView
 /// <summary>Busca guiada na biblioteca: termos casados no título, nas tags, no domínio e na narrativa, sem acentos.</summary>
 public static class LibrarySearch
 {
+    /// <summary>Palavras que não dizem nada sobre o tema (o chat manda frases inteiras, não só palavras-chave).</summary>
+    private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
+    {
+        "de", "da", "do", "das", "dos", "em", "no", "na", "nos", "nas", "um", "uma", "uns", "umas", "os", "as", "ao", "aos", "com", "sem",
+        "por", "para", "pra", "pelo", "pela", "que", "se", "ou", "eu", "me", "meu", "minha", "sou", "estou", "trabalho", "quero", "queria",
+        "treinar", "estudar", "praticar", "aprender", "sobre", "como", "mais", "muito", "isso", "esse", "essa", "tem", "ter", "ser", "num", "numa",
+    };
+
     public static IReadOnlyList<LibraryItem> Search(IEnumerable<Seed> seeds, string? query, Difficulty? difficulty, string? track)
     {
         var terms = Normalize(query ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(t => t.Length >= 2).Distinct().ToList();
+            .Where(t => t.Length >= 2 && !StopWords.Contains(t)).Distinct().ToList();
         var results = new List<LibraryItem>();
         foreach (var seed in seeds)
         {

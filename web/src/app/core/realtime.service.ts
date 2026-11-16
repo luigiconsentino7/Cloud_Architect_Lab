@@ -17,6 +17,17 @@ export interface EvaluationCompletedEvent {
   rank: string;
 }
 
+export interface ChatDeltaEvent {
+  conversationId: string;
+  delta: string;
+}
+
+export interface NarrativeReadyEvent {
+  evaluationId: string;
+  attemptId: string;
+  status: string;
+}
+
 export interface Toast {
   id: number;
   kind: 'xp' | 'level' | 'achievement' | 'error';
@@ -31,6 +42,9 @@ export class RealtimeService {
   readonly toasts = signal<Toast[]>([]);
   /** Incrementa a cada XP creditado: quem mostra o progresso recarrega. */
   readonly xpVersion = signal(0);
+  readonly narrativeReady = signal<NarrativeReadyEvent | null>(null);
+  /** Os pedaços da resposta chegam rápido demais para um signal (que só guarda o último): vão para ouvintes. */
+  private readonly chatListeners = new Set<(e: ChatDeltaEvent) => void>();
 
   private connection?: HubConnection;
   private nextToast = 1;
@@ -53,6 +67,8 @@ export class RealtimeService {
     });
     this.connection.on('LevelUp', (e: { level: number; title: string }) => this.toast('level', `Nível ${e.level}: ${e.title}!`));
     this.connection.on('AchievementUnlocked', (e: { title: string }) => this.toast('achievement', `Conquista: ${e.title}`));
+    this.connection.on('ChatDelta', (e: ChatDeltaEvent) => this.chatListeners.forEach((listener) => listener(e)));
+    this.connection.on('NarrativeReady', (e: NarrativeReadyEvent) => this.narrativeReady.set(e));
     this.connection.onreconnected(async () => {
       for (const id of this.joined) await this.connection?.invoke('JoinAttempt', id);
     });
@@ -73,6 +89,13 @@ export class RealtimeService {
   async leaveAttempt(attemptId: string): Promise<void> {
     this.joined.delete(attemptId);
     if (this.connection?.state === HubConnectionState.Connected) await this.connection.invoke('LeaveAttempt', attemptId);
+  }
+
+  /** Recebe os pedaços de resposta do entrevistador; devolve a função que cancela a inscrição. */
+  onChatDelta(listener: (e: ChatDeltaEvent) => void): () => void {
+    this.chatListeners.add(listener);
+    void this.start();
+    return () => this.chatListeners.delete(listener);
   }
 
   toast(kind: Toast['kind'], text: string): void {

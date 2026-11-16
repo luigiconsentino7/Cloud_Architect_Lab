@@ -2,26 +2,23 @@ import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } 
 import { Router, RouterLink } from '@angular/router';
 import { ApiService, problemMessage } from '../core/api.service';
 import { difficultyName, fmt, modeName, providerName, trackName } from '../core/format';
-import { ChallengeSummary, Difficulty, GameMode, LibraryItem, Provider } from '../core/models';
+import { ChallengeSummary, Difficulty, GameMode, LibraryItem, Provider, SeedSuggestion } from '../core/models';
+import { ChatComponent } from '../shared/chat.component';
 
 const difficultyOrder: Difficulty[] = ['junior', 'pleno', 'senior', 'staff'];
 
 @Component({
   selector: 'lab-home',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink],
+  imports: [RouterLink, ChatComponent],
   template: `
     <section class="hero">
       <h1>Qual problema de System Design você quer resolver hoje?</h1>
-      <p class="muted">Descreva o contexto ou o tema (ex.: "idempotência no PIX", "pico de Black Friday", "ordem de cotações") e escolha a nuvem.</p>
+      <p class="muted">
+        Conte o contexto (o que você vive no trabalho, o que quer estudar) e escolha a nuvem. Com a IA local, ela monta um desafio a partir de
+        uma semente curada; sem IA, eu busco na biblioteca. A nota nunca depende da IA.
+      </p>
       <div class="controls">
-        <input
-          type="search"
-          class="query"
-          placeholder="Contexto ou tema do desafio…"
-          [value]="query()"
-          (input)="query.set($any($event.target).value)"
-        />
         <div class="providers" role="radiogroup" aria-label="Provedor de nuvem">
           @for (p of providers; track p) {
             <button type="button" role="radio" [attr.aria-checked]="provider() === p" [class.active]="provider() === p" (click)="setProvider(p)">
@@ -39,9 +36,29 @@ const difficultyOrder: Difficulty[] = ['junior', 'pleno', 'senior', 'staff'];
           <option value="entrevista">Entrevista (sem rascunho, XP ×1,3)</option>
         </select>
       </div>
+      <lab-chat
+        kind="contexto"
+        [provider]="provider()"
+        [difficulty]="difficulty()"
+        [mode]="mode()"
+        intro="Ex.: “Sou dev num banco digital e quero treinar envio de Pix com picos de fim de mês” ou “ordens de compra de ações com ordem garantida”."
+        placeholder="Descreva o contexto do desafio…"
+        (startSeed)="startSuggestion($event)"
+      />
       @if (error()) {
         <p class="error">{{ error() }}</p>
       }
+    </section>
+
+    <section class="library">
+      <h2>Biblioteca</h2>
+      <input
+        type="search"
+        class="query"
+        placeholder="Filtrar por tema (pix, ledger, cartão, ordens, antifraude…)"
+        [value]="query()"
+        (input)="query.set($any($event.target).value)"
+      />
     </section>
 
     <section class="results">
@@ -105,13 +122,15 @@ const difficultyOrder: Difficulty[] = ['junior', 'pleno', 'senior', 'staff'];
   styles: `
     :host { display: block; max-width: 1180px; margin: 0 auto; padding: 24px 20px 60px; }
     .hero h1 { font-size: 26px; margin: 0 0 6px; }
-    .controls { display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; margin-top: 14px; align-items: center; }
-    .query { font: inherit; font-size: 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 10px; align-items: center; }
+    .library { margin-top: 28px; }
+    .library h2 { font-size: 18px; margin: 0 0 8px; }
+    .query { width: 100%; box-sizing: border-box; font: inherit; font-size: 15px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); }
     select { font: inherit; padding: 9px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); }
     .providers { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
     .providers button { border: 0; border-radius: 0; padding: 9px 14px; background: var(--surface); }
     .providers button.active { background: var(--accent); color: white; }
-    .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; margin-top: 22px; }
+    .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; margin-top: 14px; }
     .card { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--surface); }
     .card h2 { font-size: 17px; margin: 2px 0 6px; }
     .card p { margin: 4px 0; font-size: 13.5px; }
@@ -128,7 +147,6 @@ const difficultyOrder: Difficulty[] = ['junior', 'pleno', 'senior', 'staff'];
     .recent li { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
     .muted { color: var(--muted); }
     .error { color: var(--danger); }
-    @media (max-width: 860px) { .controls { grid-template-columns: 1fr; } }
   `,
 })
 export class HomeComponent {
@@ -213,6 +231,23 @@ export class HomeComponent {
       this.error.set(problemMessage(error));
     } finally {
       this.starting.set(null);
+    }
+  }
+
+  /** Sugestão do chat (modo sem IA): monta o desafio da semente com a nuvem, o nível e o modo escolhidos. */
+  protected async startSuggestion(suggestion: SeedSuggestion): Promise<void> {
+    this.error.set(null);
+    try {
+      const challenge = await this.api.createChallenge({
+        seedId: suggestion.seedId,
+        provider: this.provider(),
+        difficulty: this.difficulty(),
+        mode: this.mode(),
+        twists: [],
+      });
+      await this.router.navigate(['/desafios', challenge.id]);
+    } catch (error) {
+      this.error.set(problemMessage(error));
     }
   }
 

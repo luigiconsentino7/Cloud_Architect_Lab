@@ -3,19 +3,26 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, firstValueFrom } from 'rxjs';
 import {
   Achievement,
+  AiStatus,
   Attempt,
   Challenge,
   ChallengeSummary,
+  ChatMessage,
   Competency,
+  Conversation,
+  ConversationKind,
+  ConversationSummary,
   Difficulty,
   Evaluation,
   EvaluationTicket,
   ExcalidrawScene,
   FlowDefinition,
+  GameMode,
   Hint,
   HistoryItem,
   LibraryItem,
   Me,
+  NarrativeState,
   Palette,
   ProgressSummary,
   Provider,
@@ -141,6 +148,34 @@ export class ApiService {
 
   palette(provider: Provider): Promise<Palette> {
     return this.get<Palette>(`/api/catalog/${provider}`);
+  }
+
+  aiStatus(): Promise<AiStatus> {
+    return this.get<AiStatus>('/api/ai/status');
+  }
+
+  conversations(kind: ConversationKind): Promise<ConversationSummary[]> {
+    return this.get<ConversationSummary[]>(`/api/conversations?kind=${kind}&limit=1`);
+  }
+
+  conversation(id: string): Promise<Conversation> {
+    return this.get<Conversation>(`/api/conversations/${id}`);
+  }
+
+  /** No entrevistador, devolve a conversa que já existe para o desafio. */
+  createConversation(kind: ConversationKind, challengeId?: string): Promise<Conversation> {
+    return this.post<Conversation>('/api/conversations', { kind, challengeId });
+  }
+
+  sendMessage(
+    id: string,
+    body: { text: string; provider?: Provider; difficulty?: Difficulty; mode?: GameMode },
+  ): Promise<{ user: ChatMessage; assistant: ChatMessage }> {
+    return this.post(`/api/conversations/${id}/messages`, body);
+  }
+
+  requestNarrative(evaluationId: string): Promise<NarrativeState> {
+    return this.post<NarrativeState>(`/api/evaluations/${evaluationId}/narrative`, {});
   }
 
   exportAttempt(id: string): Observable<unknown> {

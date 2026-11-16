@@ -127,7 +127,7 @@ public sealed class ConversationService(
     private async Task<ConversationMessageEntity> ContextReplyAsync(
         ConversationEntity conversation, string text, SendMessageRequest request, Difficulty? difficulty, CancellationToken cancellationToken)
     {
-        var matched = library.Search(text, difficulty, MaxCandidates);
+        var matched = library.Search(text, difficulty, MaxCandidates).Where(s => s.MatchedTerms.Count > 0).ToList();
         var status = await ai.StatusAsync(cancellationToken);
         var note = "";
         if (status.Mode == AiMode.Ollama)

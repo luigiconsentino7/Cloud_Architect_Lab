@@ -59,6 +59,7 @@
         <button type="button" [class.active]="tab() === 'brief'" (click)="setTab('brief')">Enunciado</button>
         <button type="button" [class.active]="tab() === 'palette'" (click)="setTab('palette')">Paleta</button>
         <button type="button" [class.active]="tab() === 'flows'" (click)="setTab('flows')">Fluxos</button>
+        <button type="button" [class.active]="tab() === 'interview'" (click)="setTab('interview')">Entrevistador</button>
         <button type="button" [class.active]="tab() === 'problems'" (click)="setTab('problems')">
           Problemas
           @if (validation(); as v) {
@@ -75,6 +76,12 @@
                 <div class="hint-box"><strong>Dica {{ hint.level }}:</strong> {{ hint.text }}</div>
               }
               <p class="summary">{{ c.summary }}</p>
+              @if (c.personalizedBy) {
+                <p class="ai-note">
+                  Enunciado personalizado pela IA local ({{ c.personalizedBy }}){{ c.personalizationNote ? ': ' + c.personalizationNote : '.' }}
+                  Os números, os cenários e a nota vêm da semente curada.
+                </p>
+              }
               @for (paragraph of c.narrative.split('\n\n'); track $index) {
                 <p>{{ paragraph }}</p>
               }
@@ -167,6 +174,17 @@
                   </details>
                 }
               }
+            </section>
+          }
+          @case ('interview') {
+            <section class="interview">
+              <lab-chat
+                kind="entrevista"
+                [challengeId]="c.id"
+                [quick]="questions()"
+                intro="Pergunte o que o enunciado não deixa claro, como numa entrevista. O entrevistador só conhece a parte pública do desafio: não sabe a solução de referência nem os cenários ocultos."
+                placeholder="Sua pergunta ao entrevistador…"
+              />
             </section>
           }
           @case ('palette') {

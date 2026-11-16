@@ -7,8 +7,9 @@ import { CanvasComponent } from './canvas.component';
 import { Selection, componentData, componentSkeleton, connectionIdOf, elementsForIrIds, externalSkeleton, freePosition, live, nextComponentId, normalize, selectionOf, withCustomData } from './canvas-adapter';
 import { FlowsComponent } from './flows.component';
 import { CustomDataChange, InspectorComponent } from './inspector.component';
+import { ChatComponent } from '../shared/chat.component';
 
-type Tab = 'brief' | 'palette' | 'flows' | 'problems';
+type Tab = 'brief' | 'palette' | 'flows' | 'problems' | 'interview';
 type SaveState = 'saved' | 'dirty' | 'saving' | 'conflict' | 'error';
 
 const categoryNames: Record<string, string> = {
@@ -24,7 +25,7 @@ const categoryNames: Record<string, string> = {
 @Component({
   selector: 'lab-workspace',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CanvasComponent, FlowsComponent, InspectorComponent, RouterLink],
+  imports: [CanvasComponent, FlowsComponent, InspectorComponent, RouterLink, ChatComponent],
   templateUrl: './workspace.component.html',
   styleUrl: './workspace.component.css',
 })
@@ -64,6 +65,8 @@ export class WorkspaceComponent implements OnDestroy {
     return sel?.kind === 'connection' ? connectionIdOf(sel.arrow) : null;
   });
   protected readonly editable = computed(() => this.attempt()?.status === 'draft');
+  /** Perguntas curadas do desafio como atalhos no entrevistador. */
+  protected readonly questions = computed(() => (this.challenge()?.clarifications ?? []).map((c) => c.question).slice(0, 6));
   protected readonly errors = computed(() => this.validation()?.diagnostics.filter((d) => d.severity === 'error').length ?? 0);
   protected readonly paletteGroups = computed(() => {
     const filter = normalize(this.paletteFilter().trim());
