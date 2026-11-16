@@ -96,9 +96,8 @@ No Linux, macOS ou Git Bash:
 ./lab.sh ai eval --models qwen2.5:3b,gemma3:4b
 ```
 
-Referência (RTX 3050 de 4 GB, 16/11/2026): os dois modelos acima passam nos critérios; o `qwen2.5:3b` cabe inteiro
-na GPU (≈ 70 tokens/s, respostas em menos de 1 s no chat) e o `gemma3:4b` é mais preciso e ≈ 4× mais lento (≈ 19
-tokens/s). Detalhes em [docs/spec/11](docs/spec/11-estado-da-implementacao.md#spike-s4-primeira-rodada-real-16112026).
+Referência (RTX 3050 de 4 GB, 16/11/2026): os dois modelos acima passam nos critérios; o `qwen2.5:3b` roda a ≈ 70
+tokens/s (respostas em menos de 1 s no chat) e o `gemma3:4b` é um pouco mais preciso e ≈ 4× mais lento (≈ 19 tokens/s). Detalhes em [docs/spec/11](docs/spec/11-estado-da-implementacao.md#spike-s4-primeira-rodada-real-16112026).
 
 O comando carrega o modelo na memória antes de medir, mostra uma linha por caso e leva alguns minutos por modelo. O
 relatório (em `exports/evals/`) mostra, por modelo, deltas válidos e aderentes ao contexto, respostas certas e sem

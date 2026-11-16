@@ -34,7 +34,7 @@ Todos os 21 itens do backlog do MVP ([10](10-roadmap-e-riscos.md#backlog-do-mvp-
 | Narrador confere números e componentes citados | Confere os números; componentes não são checados | Nomes de componentes são texto livre do usuário, sem um jeito confiável de conferir; o prompt proíbe inventar |
 | A narrativa de IA substitui o enunciado | A narrativa entra antes do enunciado curado, que continua com os números | Os números do desafio vêm das variáveis; o modelo não pode contradizê-los |
 | `ILabelMapper` sugere para qualquer forma | Os aliases do catálogo resolvem o que casam; a IA só é consultada para rótulos que não casaram, sob demanda (botão), e o schema só aceita ids da paleta ou "nenhum" | Cada consulta leva segundos num modelo local: a validação ao vivo não pode esperar por ela |
-| Esquema do personalizador: "a lista de IDs válidos" | JSON Schema por semente (`anyOf`, um ramo por candidata com o `seedId` fixo e só as pegadinhas e variáveis dela), com o esquema simples como reserva se o Ollama recusar o primeiro | No S4 real, em 20 de 24 respostas o modelo escolheu pegadinhas de outra semente (o esquema simples listava as de todas) e a validação as descartava |
+| Esquema do personalizador: "a lista de IDs válidos" | JSON Schema por semente (`anyOf`, um ramo por candidata com o `seedId` fixo e só as pegadinhas e variáveis dela), com o esquema simples como reserva se o Ollama recusar o primeiro | No S4 real, em 19 de 24 respostas (10 do qwen e 9 do gemma) o modelo escolheu pegadinhas de outra semente (o esquema simples listava as de todas) e a validação as descartava |
 | Mapeador: escolhe um id ou "nenhum" | Decide primeiro `componente` (sim ou não) e só então o id; prompt v2 com exemplos | No S4 real os dois modelos tipavam anotações como serviço (`time de plataforma` virou `aws.cognito`) quando "nenhum" era uma opção entre 30 ids |
 | Entrevistador: "diga que não tem essa informação" sobre os cenários ocultos | Prompt v2 manda confirmar que eles existem e que o conteúdo é desconhecido; o eval reprova quem nega | No S4 real o qwen2.5:3b respondeu "não há cenários de teste ocultos", o que é falso, e o eval antigo só olhava vazamento |
 | Porta `IFlowRanker` | Não implementada: a sugestão de fluxos é a busca no grafo | Os evals ainda não mostraram ganho real com o modelo local |
@@ -96,14 +96,15 @@ caso. A rodada usou o personalizador com esquema simples, o mapeador e o entrevi
 | Primeiro token · tokens/s | 0,1 s · 71,5 | 0,6 s · 18,6 |
 | Critérios do S4 | passa | passa |
 
-- O qwen2.5:3b cabe inteiro nos 4 GB (4× mais rápido); o gemma3:4b passa dos 4 GB, divide camadas com a CPU e fica na
-  beirada dos 15 tokens/s. Os dois passam no S4; a escolha é precisão × velocidade.
+- O qwen2.5:3b deve caber inteiro nos 4 GB e roda 4× mais rápido; o gemma3:4b provavelmente passa dos 4 GB e divide
+  camadas com a CPU (inferência pela velocidade, não medida), ficando na beirada dos 15 tokens/s. Os dois passam no
+  S4; a escolha é precisão × velocidade.
 - Pontos fracos vistos nos dois: pegadinhas de outras sementes (corrigido com o esquema por semente) e anotações
   tipadas como serviço (corrigido com a decisão `componente`). Só o qwen: uma semente errada (razão contábil virou
   Pix), "PDF" virou `aws.secretsmanager` e a negação dos cenários ocultos.
 - Os números não dizem se a escrita em português é boa: o relatório novo traz as narrativas, os comentários do mentor
   e as respostas do entrevistador para serem lidos.
-- Decisão provisória: o padrão continua `qwen2.5:3b` (cabe na GPU sem disputar a CPU com o motor de simulação e
+- Decisão provisória: o padrão continua `qwen2.5:3b` (deve caber na GPU sem disputar a CPU com o motor de simulação e
   responde em menos de 1 s no chat); `gemma3:4b` é a opção de mais precisão (`Ai:Ollama:Model`). Fecha depois de
   repetir a rodada com as correções.
 
