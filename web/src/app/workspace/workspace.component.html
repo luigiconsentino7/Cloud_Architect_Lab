@@ -72,6 +72,13 @@
         @switch (tab()) {
           @case ('brief') {
             <section class="brief">
+              <div class="brief-actions">
+                <button type="button" [disabled]="!!busy() || adjusting()" (click)="another()" title="Outro desafio da mesma semente, com números novos">Outro</button>
+                <button type="button" [disabled]="!!busy()" [class.active]="adjusting()" (click)="adjusting.set(!adjusting())">Ajustar</button>
+              </div>
+              @if (adjusting()) {
+                <lab-adjust-panel [challenge]="c" (created)="openChallenge($event.id)" (closed)="adjusting.set(false)" />
+              }
               @for (hint of hints(); track hint.level) {
                 <div class="hint-box"><strong>Dica {{ hint.level }}:</strong> {{ hint.text }}</div>
               }

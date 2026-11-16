@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnDestroy, computed, inject, input, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { ApiService, problemMessage } from '../core/api.service';
 import { difficultyName, fmt, metricName, modeName, providerName, sloTarget } from '../core/format';
@@ -8,6 +8,7 @@ import { Selection, componentData, componentSkeleton, connectionIdOf, elementsFo
 import { FlowsComponent } from './flows.component';
 import { CustomDataChange, InspectorComponent } from './inspector.component';
 import { ChatComponent } from '../shared/chat.component';
+import { AdjustPanelComponent } from './adjust-panel.component';
 
 type Tab = 'brief' | 'palette' | 'flows' | 'problems' | 'interview';
 type SaveState = 'saved' | 'dirty' | 'saving' | 'conflict' | 'error';
@@ -25,7 +26,7 @@ const categoryNames: Record<string, string> = {
 @Component({
   selector: 'lab-workspace',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CanvasComponent, FlowsComponent, InspectorComponent, RouterLink, ChatComponent],
+  imports: [CanvasComponent, FlowsComponent, InspectorComponent, RouterLink, ChatComponent, AdjustPanelComponent],
   templateUrl: './workspace.component.html',
   styleUrl: './workspace.component.css',
 })
@@ -57,6 +58,7 @@ export class WorkspaceComponent implements OnDestroy {
   protected readonly message = signal<string | null>(null);
   protected readonly hints = signal<Hint[]>([]);
   protected readonly paletteFilter = signal('');
+  protected readonly adjusting = signal(false);
   protected readonly loadError = signal<string | null>(null);
 
   protected readonly selection = computed<Selection>(() => selectionOf(this.elements(), this.selectedIds()));
@@ -86,7 +88,11 @@ export class WorkspaceComponent implements OnDestroy {
   private pendingScene = false;
 
   constructor() {
-    queueMicrotask(() => void this.load());
+    // "Outro" e "Ajustar" navegam para outro desafio na mesma rota: a tela recarrega tudo quando o id muda.
+    effect(() => {
+      const id = this.id();
+      untracked(() => void this.open(id));
+    });
   }
 
   ngOnDestroy(): void {
@@ -197,6 +203,26 @@ export class WorkspaceComponent implements OnDestroy {
     });
   }
 
+  /** "Outro": mesma semente, nuvem, nível e pegadinhas, com números novos. */
+  protected async another(): Promise<void> {
+    const challenge = this.challenge();
+    if (!challenge) return;
+    this.busy.set('Montando outro desafio…');
+    try {
+      const other = await this.api.anotherVariation(challenge.id);
+      await this.openChallenge(other.id);
+    } catch (error) {
+      this.message.set(problemMessage(error));
+    } finally {
+      this.busy.set(null);
+    }
+  }
+
+  protected async openChallenge(id: string): Promise<void> {
+    this.adjusting.set(false);
+    await this.router.navigate(['/desafios', id]);
+  }
+
   protected async newAttempt(): Promise<void> {
     const challenge = this.challenge();
     if (!challenge) return;
@@ -218,6 +244,27 @@ export class WorkspaceComponent implements OnDestroy {
 
   protected reloadTheirs(): void {
     location.reload();
+  }
+
+  private async open(id: string): Promise<void> {
+    if (this.pendingScene) await this.saveNow();
+    clearTimeout(this.saveTimer);
+    clearTimeout(this.flowsTimer);
+    if (this.challenge() && this.challenge()!.id !== id) {
+      // Limpa a tela do desafio anterior: o canvas é recriado com o desenho do novo.
+      this.challenge.set(null);
+      this.attempt.set(null);
+      this.validation.set(null);
+      this.hints.set([]);
+      this.flows.set([]);
+      this.elements.set([]);
+      this.selectedIds.set([]);
+      this.message.set(null);
+      this.loadError.set(null);
+      this.tab.set('brief');
+      this.saveState.set('saved');
+    }
+    await this.load();
   }
 
   private async load(): Promise<void> {

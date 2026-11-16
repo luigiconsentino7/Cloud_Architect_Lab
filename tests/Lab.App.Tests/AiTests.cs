@@ -86,6 +86,50 @@ public sealed class AiTests
     }
 
     [Fact]
+    public async Task Com_ia_local_ajustar_por_instrucao_usa_o_contexto_original_e_valida_o_delta()
+    {
+        var fake = new ScriptedModel();
+        var calls = 0;
+        fake.Personalize = options =>
+        {
+            calls++;
+            return new
+            {
+                seedId = ScriptedModel.Enum(options, "seedId")[0],
+                narrative = calls == 1 ? "A FinBank vai lançar Pix por aproximação." : "A FinBank cresceu e agora precisa aguentar o dobro de clientes.",
+                variables = calls == 1 ? Array.Empty<object>() : new object[] { new { name = "baselineRps", value = 50_000.0 } },
+                twists = Array.Empty<string>(),
+                reason = calls == 1 ? "Pix num banco digital." : "Você pediu mais volume.",
+            };
+        };
+        await using var factory = WithModel(fake);
+        var api = factory.Api();
+        var chat = await api.PostJson("/api/conversations", new { kind = "contexto" });
+        var created = (await api.PostJson($"/api/conversations/{chat["id"]}/messages",
+            new { text = "Trabalho num banco digital e quero treinar envio de Pix", provider = "aws", difficulty = "senior" }))["assistant"]!["payload"]!;
+
+        var options = await (await api.GetAsync($"/api/challenges/{created["challengeId"]}/options")).ReadObject();
+        options["aiAvailable"]!.GetValue<bool>().ShouldBeTrue();
+        var adjusted = await api.PostJson($"/api/challenges/{created["challengeId"]}/variations", new { instruction = "quero o volume no máximo do nível" });
+
+        adjusted["seedId"]!.GetValue<string>().ShouldBe(created["seedId"]!.GetValue<string>());
+        adjusted["narrative"]!.GetValue<string>().ShouldStartWith("A FinBank cresceu");
+        adjusted["personalizationNote"]!.GetValue<string>().ShouldBe("Você pediu mais volume.");
+        var seed = ContentRepository.LoadDiscovered().FindSeed(created["seedId"]!.GetValue<string>())!;
+        if (seed.Variables.TryGetValue("baselineRps", out var rps))
+            adjusted["variables"]!["baselineRps"]!.GetValue<double>().ShouldBe(rps.Ranges[Difficulty.Senior][1]);
+        var adjustCall = fake.Calls.Last(c => c.Messages[0].Text.StartsWith("Você monta desafios", StringComparison.Ordinal));
+        var user = adjustCall.Messages.Last(m => m.Role == ChatRole.User).Text;
+        user.ShouldContain("Trabalho num banco digital"); // o contexto original continua valendo
+        user.ShouldContain("Ajuste pedido: quero o volume no máximo do nível");
+        ScriptedModel.Enum(adjustCall.Options, "seedId").ShouldBe([created["seedId"]!.GetValue<string>()]); // só a mesma semente
+
+        var other = await api.PostJson($"/api/challenges/{adjusted["id"]}/variations", new { });
+        other["narrative"]!.GetValue<string>().ShouldStartWith("A FinBank cresceu"); // o "Outro" mantém a personalização
+        other["personalizedBy"]!.GetValue<string>().ShouldBe("modelo-teste");
+    }
+
+    [Fact]
     public async Task Com_ia_local_o_entrevistador_transmite_e_nao_conhece_o_que_e_oculto()
     {
         var fake = new ScriptedModel { Interview = "Pode assumir, mas deixe a premissa explícita no desenho." };

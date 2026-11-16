@@ -77,6 +77,21 @@ try {
   assert.match(await page.locator('lab-chat .source').last().innerText(), /curada/i, 'sem IA, o entrevistador usa os esclarecimentos curados');
   await page.screenshot({ path: `${shots}/entrevistador.png` });
 
+  // "Outro" e "Ajustar": desafios novos da mesma semente, na mesma tela.
+  await page.click('nav.tabs button:has-text("Enunciado")');
+  const firstId = page.url().split('/').pop();
+  await page.click('.brief-actions button:has-text("Outro")');
+  await page.waitForURL((url) => !url.pathname.endsWith(firstId));
+  await page.waitForSelector('.excalidraw');
+  const otherId = page.url().split('/').pop();
+  await page.click('.brief-actions button:has-text("Ajustar")');
+  await page.waitForSelector('lab-adjust-panel select[aria-label="Nível do desafio"]');
+  await page.selectOption('lab-adjust-panel select[aria-label="Nível do desafio"]', 'senior');
+  await page.click('lab-adjust-panel button:has-text("Criar desafio ajustado")');
+  await page.waitForURL((url) => !url.pathname.endsWith(otherId));
+  await page.waitForSelector('.excalidraw');
+  assert.match(await page.locator('header.bar small').innerText(), /Sênior/, 'o desafio ajustado está no nível pedido');
+
   // Jornada 5: perfil mostra nível, competências e histórico.
   await page.click('a:has-text("Perfil")');
   await page.waitForSelector('.level');

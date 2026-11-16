@@ -6,6 +6,7 @@ import {
   AiStatus,
   Attempt,
   Challenge,
+  ChallengeOptions,
   ChallengeSummary,
   ChatMessage,
   Competency,
@@ -29,6 +30,7 @@ import {
   ReferenceView,
   TimeSeries,
   Validation,
+  VariationRequest,
 } from './models';
 
 /** Header que o backend exige nas requisições que alteram dados (proteção contra CSRF no localhost). */
@@ -76,8 +78,13 @@ export class ApiService {
     return this.get<Challenge>(`/api/challenges/${id}`);
   }
 
-  anotherVariation(id: string): Promise<Challenge> {
-    return this.post<Challenge>(`/api/challenges/${id}/variations`, {});
+  /** "Outro" (sem corpo) ou "Ajustar" (com campos ou uma instrução para a IA local). */
+  anotherVariation(id: string, body: VariationRequest = {}): Promise<Challenge> {
+    return this.post<Challenge>(`/api/challenges/${id}/variations`, body);
+  }
+
+  challengeOptions(id: string): Promise<ChallengeOptions> {
+    return this.get<ChallengeOptions>(`/api/challenges/${id}/options`);
   }
 
   attempts(challengeId: string): Promise<Attempt[]> {

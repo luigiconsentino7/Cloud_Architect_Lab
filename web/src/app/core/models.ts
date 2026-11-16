@@ -599,3 +599,35 @@ export interface ConversationSummary {
   title: string;
   updatedAt: string;
 }
+
+// ---- ajuste do desafio ----
+
+export interface VariableOption {
+  description: string;
+  step: number;
+  /** Faixa [mín, máx] por dificuldade. */
+  ranges: Partial<Record<Difficulty, [number, number]>>;
+}
+
+export interface ChallengeOptions {
+  challengeId: string;
+  seedId: string;
+  provider: Provider;
+  difficulty: Difficulty;
+  mode: GameMode;
+  difficulties: Difficulty[];
+  twists: TwistInfo[];
+  variables: Record<string, VariableOption>;
+  currentVariables: Record<string, number>;
+  currentTwists: string[];
+  aiAvailable: boolean;
+}
+
+export interface VariationRequest {
+  provider?: Provider;
+  difficulty?: Difficulty;
+  mode?: GameMode;
+  twists?: string[];
+  variables?: Record<string, number>;
+  instruction?: string;
+}

@@ -35,7 +35,23 @@ public sealed record SeedCandidate(
     string Track,
     IReadOnlyList<string> Tags,
     IReadOnlyList<TwistCandidate> Twists,
-    IReadOnlyDictionary<string, VariableRange> Variables);
+    IReadOnlyDictionary<string, VariableRange> Variables)
+{
+    /// <summary>A semente como o personalizador a vê: faixas da dificuldade e só as pegadinhas permitidas nela.</summary>
+    public static SeedCandidate From(Lab.Ir.Seeds.Seed seed, Lab.Ir.Challenges.Difficulty difficulty) => new(
+        seed.Id,
+        seed.Title,
+        seed.Summary,
+        seed.Track,
+        seed.Tags,
+        seed.Twists.Where(t => t.MinDifficulty <= difficulty).Select(t => new TwistCandidate(t.Id, t.Title, t.Description)).ToList(),
+        seed.Variables
+            .Where(v => v.Value.Ranges.TryGetValue(difficulty, out var r) && r.Length == 2)
+            .ToDictionary(
+                v => v.Key,
+                v => new VariableRange(v.Value.Ranges[difficulty][0], v.Value.Ranges[difficulty][1], v.Value.Step, v.Value.Description),
+                StringComparer.Ordinal));
+}
 
 public sealed record PersonalizationRequest(string Context, string Difficulty, IReadOnlyList<SeedCandidate> Candidates);
 

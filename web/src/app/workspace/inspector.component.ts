@@ -45,10 +45,10 @@ export interface CustomDataChange {
       </header>
       <label class="field">
         <span>Tipo de interação</span>
-        <select [value]="connection()?.interaction ?? ''" (change)="setInteraction($any($event.target).value)">
-          <option value="">automático (pelo tipo dos componentes)</option>
+        <select (change)="setInteraction($any($event.target).value)">
+          <option value="" [selected]="!connection()?.interaction">automático (pelo tipo dos componentes)</option>
           @for (option of interactions; track option) {
-            <option [value]="option">{{ labels[option] }}</option>
+            <option [value]="option" [selected]="option === connection()?.interaction">{{ labels[option] }}</option>
           }
         </select>
       </label>
@@ -64,9 +64,9 @@ export interface CustomDataChange {
         <legend>Operações de dados</legend>
         @for (op of ops(); track $index) {
           <div class="op">
-            <select [value]="op.op" (change)="setOp($index, $any($event.target).value, op.count)">
+            <select (change)="setOp($index, $any($event.target).value, op.count)">
               @for (kind of dataOps; track kind) {
-                <option [value]="kind">{{ labels[kind] }}</option>
+                <option [value]="kind" [selected]="kind === op.op">{{ labels[kind] }}</option>
               }
             </select>
             <input type="number" min="1" [value]="op.count" (change)="setOp($index, op.op, +$any($event.target).value)" />
@@ -88,10 +88,10 @@ export interface CustomDataChange {
         @case ('select') {
           <label class="field">
             <span>{{ field.label }}</span>
-            <select [value]="value ?? ''" (change)="set(field, $any($event.target).value, connection)">
-              <option value="">{{ field.defaultValue != null ? 'padrão (' + (labels[field.defaultValue] ?? field.defaultValue) + ')' : '—' }}</option>
+            <select (change)="set(field, $any($event.target).value, connection)">
+              <option value="" [selected]="value == null || value === ''">{{ field.defaultValue != null ? 'padrão (' + (labels[field.defaultValue] ?? field.defaultValue) + ')' : '—' }}</option>
               @for (option of optionsFor(field); track option) {
-                <option [value]="option">{{ labels[option] ?? option }}</option>
+                <option [value]="option" [selected]="same(option, value)">{{ labels[option] ?? option }}</option>
               }
             </select>
           </label>
@@ -155,6 +155,11 @@ export class InspectorComponent {
   readonly palette = input<Palette | null>(null);
   readonly elements = input<readonly SceneElement[]>([]);
   readonly customDataChange = output<CustomDataChange>();
+
+  /** Compara o valor salvo (número ou texto) com a opção do select. */
+  protected same(option: unknown, value: unknown): boolean {
+    return option != null && value != null && String(option) === String(value);
+  }
 
   protected readonly labels: Record<string, string> = optionLabels as Record<string, string>;
   protected readonly interactions = interactionOptions;

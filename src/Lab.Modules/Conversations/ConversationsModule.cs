@@ -136,13 +136,13 @@ public sealed class ConversationService(
             var ids = matched.Select(m => m.SeedId).ToList();
             ids.AddRange(library.Search(null, difficulty, 50).Select(s => s.SeedId).Where(id => !ids.Contains(id)).Take(MaxCandidates - ids.Count));
             var candidates = ids.Select(content.FindSeed).OfType<Seed>().Where(s => s.Difficulties.Count == 0 || s.Difficulties.Contains(level))
-                .Select(s => Candidate(s, level)).ToList();
+                .Select(s => SeedCandidate.From(s, level)).ToList();
             var result = await personalizer.PersonalizeAsync(new PersonalizationRequest(text, level.ToString().ToLowerInvariant(), candidates), cancellationToken);
             if (result is not null)
             {
                 try
                 {
-                    var created = await library.CreateAsync(Order(result, text, request, level), cancellationToken);
+                    var created = await library.CreateAsync(ChallengeOrders.Personalized(result, text, request.Provider!, level.ToString().ToLowerInvariant(), request.Mode), cancellationToken);
                     var reply = $"Montei o desafio “{created.Title}” a partir do seu contexto. {result.Delta.Reason}".Trim();
                     return await AddAsync(conversation, "assistant", reply, MessageSource.Ai, result.Model, result.PromptVersion, new
                     {
@@ -201,42 +201,6 @@ public sealed class ConversationService(
         return await AddAsync(conversation, "assistant", answer.Text, answer.Source, answer.Model, answer.PromptVersion,
             answer.MatchedQuestion is null ? null : new { matchedQuestion = answer.MatchedQuestion }, cancellationToken);
     }
-
-    private static ChallengeOrder Order(PersonalizationResult result, string context, SendMessageRequest request, Difficulty level) =>
-        new(result.Delta.SeedId, request.Provider!, level.ToString().ToLowerInvariant(), request.Mode)
-        {
-            Variables = result.Delta.Variables,
-            Twists = result.Delta.Twists,
-            Narrative = result.Delta.Narrative,
-            ExtraClarifications = result.Delta.ClarificationsExtra
-                .Select(c => new ClarificationSpec { Question = c.Question, Answer = c.Answer, Keywords = Keywords(c.Question) })
-                .ToList(),
-            PersonalizedBy = result.Model,
-            PersonalizationNote = result.Delta.Reason,
-            PersonalizationJson = Json.Serialize(new
-            {
-                context,
-                delta = result.Delta,
-                model = result.Model,
-                promptVersion = result.PromptVersion,
-                adjustments = result.Adjustments,
-            }),
-        };
-
-    /// <summary>A semente como o personalizador a vê: faixas da dificuldade e só as pegadinhas permitidas nela.</summary>
-    public static SeedCandidate Candidate(Seed seed, Difficulty difficulty) => new(
-        seed.Id,
-        seed.Title,
-        seed.Summary,
-        seed.Track,
-        seed.Tags,
-        seed.Twists.Where(t => t.MinDifficulty <= difficulty).Select(t => new TwistCandidate(t.Id, t.Title, t.Description)).ToList(),
-        seed.Variables
-            .Where(v => v.Value.Ranges.TryGetValue(difficulty, out var r) && r.Length == 2)
-            .ToDictionary(v => v.Key, v => new VariableRange(v.Value.Ranges[difficulty][0], v.Value.Ranges[difficulty][1], v.Value.Step, v.Value.Description), StringComparer.Ordinal));
-
-    private static IReadOnlyList<string> Keywords(string question) =>
-        AiText.Normalize(question).Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length >= 5).Distinct(StringComparer.Ordinal).Take(4).ToList();
 
     private static Difficulty? ParseDifficulty(string? difficulty)
     {

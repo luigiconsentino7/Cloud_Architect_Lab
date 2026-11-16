@@ -18,6 +18,8 @@ export const providerName: Record<Provider, string> = { aws: 'AWS', azure: 'Azur
 
 export const difficultyName: Record<Difficulty, string> = { junior: 'Júnior', pleno: 'Pleno', senior: 'Sênior', staff: 'Staff' };
 
+export const difficultyOrder: Difficulty[] = ['junior', 'pleno', 'senior', 'staff'];
+
 export const modeName: Record<GameMode, string> = { treino: 'Treino', entrevista: 'Entrevista', plantao: 'Plantão' };
 
 export const dimensionName: Record<Dimension, string> = {

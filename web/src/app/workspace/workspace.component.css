@@ -68,3 +68,7 @@ summary { cursor: pointer; }
 .muted { color: var(--muted); }
 
 .page-loading, .page-error { display: grid; place-items: center; height: 100%; color: var(--muted); }
+
+.brief-actions { display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 6px; }
+.brief-actions button { font-size: 12.5px; padding: 4px 10px; }
+.brief-actions button.active { border-color: var(--accent); color: var(--accent); }

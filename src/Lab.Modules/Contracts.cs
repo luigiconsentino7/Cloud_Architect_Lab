@@ -53,6 +53,36 @@ namespace Lab.Modules.Challenges.Contracts
         public string? PersonalizationJson { get; init; }
     }
 
+    /// <summary>Monta pedidos de desafio a partir do delta da IA (o mesmo formato no chat e no "Ajustar").</summary>
+    public static class ChallengeOrders
+    {
+        public static ChallengeOrder Personalized(Lab.Ai.PersonalizationResult result, string context, string provider, string difficulty, string? mode) =>
+            new(result.Delta.SeedId, provider, difficulty, mode)
+            {
+                Variables = result.Delta.Variables,
+                Twists = result.Delta.Twists,
+                Narrative = result.Delta.Narrative,
+                ExtraClarifications = result.Delta.ClarificationsExtra
+                    .Select(c => new ClarificationSpec { Question = c.Question, Answer = c.Answer, Keywords = Keywords(c.Question) })
+                    .ToList(),
+                PersonalizedBy = result.Model,
+                PersonalizationNote = result.Delta.Reason,
+                PersonalizationJson = Lab.Modules.Shared.Json.Serialize(new StoredPersonalization(context, result.Delta, result.Model, result.PromptVersion, result.Adjustments)),
+            };
+
+        /// <summary>Palavras-chave de um esclarecimento gerado pela IA (para o entrevistador sem IA casar a pergunta).</summary>
+        public static IReadOnlyList<string> Keywords(string question) =>
+            Lab.Ai.AiText.Normalize(question).Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length >= 5).Distinct(StringComparer.Ordinal).Take(4).ToList();
+    }
+
+    /// <summary>O que fica gravado de uma personalização: o contexto do usuário, o delta validado, o modelo e o prompt.</summary>
+    public sealed record StoredPersonalization(
+        string? Context,
+        Lab.Ai.ChallengeDelta? Delta,
+        string? Model,
+        string? PromptVersion,
+        IReadOnlyList<string>? Adjustments);
+
     /// <summary>Parte pública do desafio em texto, para o entrevistador: sem cenários ocultos e sem referência.</summary>
     public sealed record ChallengeBrief(Guid Id, string Title, string Statement, IReadOnlyList<ClarificationSpec> Clarifications);
 

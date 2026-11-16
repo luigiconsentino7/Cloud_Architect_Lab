@@ -26,14 +26,14 @@ const difficultyOrder: Difficulty[] = ['junior', 'pleno', 'senior', 'staff'];
             </button>
           }
         </div>
-        <select [value]="difficulty()" (change)="difficulty.set($any($event.target).value)" aria-label="Dificuldade">
+        <select (change)="difficulty.set($any($event.target).value)" aria-label="Dificuldade">
           @for (d of difficulties; track d) {
-            <option [value]="d">{{ difficultyName[d] }}</option>
+            <option [value]="d" [selected]="d === difficulty()">{{ difficultyName[d] }}</option>
           }
         </select>
-        <select [value]="mode()" (change)="mode.set($any($event.target).value)" aria-label="Modo">
-          <option value="treino">Treino (com simulação de rascunho)</option>
-          <option value="entrevista">Entrevista (sem rascunho, XP ×1,3)</option>
+        <select (change)="mode.set($any($event.target).value)" aria-label="Modo">
+          <option value="treino" [selected]="mode() === 'treino'">Treino (com simulação de rascunho)</option>
+          <option value="entrevista" [selected]="mode() === 'entrevista'">Entrevista (sem rascunho, XP ×1,3)</option>
         </select>
       </div>
       <lab-chat
