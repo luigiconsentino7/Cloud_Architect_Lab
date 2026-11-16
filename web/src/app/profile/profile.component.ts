@@ -1,14 +1,15 @@
-import { ChangeDetectionStrategy, Component, effect, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { ApiService } from '../core/api.service';
+import { ApiService, problemMessage } from '../core/api.service';
 import { competencyName, fmt, rankClass } from '../core/format';
 import { Achievement, Competency, HistoryItem, ProgressSummary } from '../core/models';
 import { RealtimeService } from '../core/realtime.service';
+import { RadarComponent } from './radar.component';
 
 @Component({
   selector: 'lab-profile',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink],
+  imports: [RouterLink, RadarComponent],
   template: `
     @if (progress(); as p) {
       <section class="level">
@@ -23,6 +24,9 @@ import { RealtimeService } from '../core/realtime.service';
     <div class="grid">
       <section class="block">
         <h2>Competências</h2>
+        @if (competencies().length >= 3) {
+          <lab-radar [items]="radarItems()" />
+        }
         @for (c of competencies(); track c.competency) {
           <div class="competency">
             <span>{{ competencyName[c.competency] ?? c.competency }}</span>
@@ -47,6 +51,24 @@ import { RealtimeService } from '../core/realtime.service';
         </div>
       </section>
     </div>
+
+    <section class="block data">
+      <h2>Seus dados</h2>
+      <p class="muted">
+        Tudo fica na sua máquina. O backup leva desafios, desenhos, avaliações, XP, conquistas e conversas; importar
+        substitui os dados atuais (uma cópia do banco atual é guardada antes).
+      </p>
+      <div class="buttons">
+        <button type="button" [disabled]="!!dataBusy()" (click)="exportBackup()">{{ dataBusy() === 'export' ? 'Exportando…' : 'Exportar backup' }}</button>
+        <label class="button" [class.disabled]="!!dataBusy()">
+          {{ dataBusy() === 'import' ? 'Importando…' : 'Importar backup' }}
+          <input type="file" accept="application/json,.json" hidden [disabled]="!!dataBusy()" (change)="importBackup($any($event.target))" />
+        </label>
+      </div>
+      @if (dataMessage()) {
+        <p class="data-message" [class.error]="dataError()">{{ dataMessage() }}</p>
+      }
+    </section>
 
     <section class="block">
       <h2>Histórico</h2>
@@ -88,6 +110,12 @@ import { RealtimeService } from '../core/realtime.service';
     table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
     td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
     .mini { width: 26px; height: 26px; border-radius: 7px; font-size: 14px; display: grid; place-items: center; color: white; font-weight: 800; }
+    .data .buttons { display: flex; gap: 8px; align-items: center; }
+    .data label.button { cursor: pointer; }
+    .data label.button.disabled { opacity: 0.6; pointer-events: none; }
+    .data-message { font-size: 13px; margin: 8px 0 0; color: var(--ok); }
+    .data-message.error { color: var(--danger); }
+    lab-radar { margin: 4px 0 10px; }
     @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
   `,
 })
@@ -102,6 +130,10 @@ export class ProfileComponent {
   protected readonly competencies = signal<Competency[]>([]);
   protected readonly achievements = signal<Achievement[]>([]);
   protected readonly history = signal<HistoryItem[]>([]);
+  protected readonly radarItems = computed(() => this.competencies().map((c) => ({ label: competencyName[c.competency] ?? c.competency, value: c.rating })));
+  protected readonly dataBusy = signal<'export' | 'import' | null>(null);
+  protected readonly dataMessage = signal<string | null>(null);
+  protected readonly dataError = signal(false);
 
   constructor() {
     effect(() => {
@@ -113,6 +145,48 @@ export class ProfileComponent {
   protected percent(p: ProgressSummary): number {
     const span = Math.max(1, p.nextLevelXp - p.levelStartXp);
     return Math.min(100, Math.max(0, ((p.totalXp - p.levelStartXp) / span) * 100));
+  }
+
+  protected async exportBackup(): Promise<void> {
+    this.dataBusy.set('export');
+    this.dataMessage.set(null);
+    try {
+      const backup = await this.api.exportBackup();
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `cloud-architect-lab-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      this.report('Backup exportado.', false);
+    } catch (error) {
+      this.report(problemMessage(error), true);
+    } finally {
+      this.dataBusy.set(null);
+    }
+  }
+
+  protected async importBackup(input: HTMLInputElement): Promise<void> {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    if (!confirm(`Importar "${file.name}"? Isso substitui todos os dados atuais (uma cópia do banco atual é guardada antes).`)) return;
+    this.dataBusy.set('import');
+    this.dataMessage.set(null);
+    try {
+      const result = await this.api.importBackup(JSON.parse(await file.text()));
+      this.report(`Backup importado: ${fmt.int(result.challenges)} desafios e ${fmt.int(result.evaluations)} avaliações. Cópia do banco anterior: ${result.safetyCopy}.`, false);
+      await this.load();
+    } catch (error) {
+      this.report(error instanceof SyntaxError ? 'O arquivo não é um JSON válido.' : problemMessage(error), true);
+    } finally {
+      this.dataBusy.set(null);
+    }
+  }
+
+  private report(message: string, isError: boolean): void {
+    this.dataMessage.set(message);
+    this.dataError.set(isError);
   }
 
   private async load(): Promise<void> {

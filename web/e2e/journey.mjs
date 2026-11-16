@@ -110,7 +110,17 @@ try {
   await page.waitForSelector('.level');
   assert.ok((await page.locator('.competency').count()) > 0, 'competências atualizadas');
   assert.ok((await page.locator('table tr').count()) >= 2, 'histórico com as avaliações');
+  assert.equal(await page.locator('lab-radar polygon.area').count(), 1, 'radar de competências');
   await page.screenshot({ path: `${shots}/perfil.png` });
+
+  // Backup de ida e volta pela interface: exporta o arquivo e importa de novo (com cópia do banco antes).
+  const xpBeforeBackup = (await api('/api/me/progress')).summary.totalXp;
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Exportar backup")')]);
+  const backupFile = `${shots}/backup.json`;
+  await download.saveAs(backupFile);
+  await page.setInputFiles('.data input[type=file]', backupFile);
+  await page.waitForSelector('.data-message:has-text("Backup importado")', { timeout: 30_000 });
+  assert.equal((await api('/api/me/progress')).summary.totalXp, xpBeforeBackup, 'XP continua o mesmo depois de importar');
 
   assert.deepEqual(errors, [], 'sem erros no console');
   console.log(`✓ jornadas ponta a ponta ok (nota ${score}, XP ${xpBefore} → ${xpAfterSubmission})`);

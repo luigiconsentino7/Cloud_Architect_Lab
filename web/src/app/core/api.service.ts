@@ -191,6 +191,16 @@ export class ApiService {
     return this.post<NarrativeState>(`/api/evaluations/${evaluationId}/narrative`, {});
   }
 
+  /** Backup completo (o arquivo que o perfil oferece para download). */
+  exportBackup(): Promise<unknown> {
+    return this.post<unknown>('/api/backup/export', {});
+  }
+
+  /** Substitui todos os dados pelos do backup (o servidor copia o banco atual antes). */
+  importBackup(backup: unknown): Promise<{ rows: number; challenges: number; evaluations: number; safetyCopy: string }> {
+    return this.post('/api/backup/import', backup);
+  }
+
   exportAttempt(id: string): Observable<unknown> {
     return this.http.get(`/api/attempts/${id}/export`);
   }

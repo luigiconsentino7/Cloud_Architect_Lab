@@ -59,20 +59,22 @@ public static class SystemEndpoints
         app.MapGet("/api/rules", (LabContent content) => Results.Ok(content.RuleTexts.All.OrderBy(t => t.Id, StringComparer.Ordinal)))
             .WithTags("Conteúdo");
 
-        // Exportação completa em JSON (a importação fica para depois: por ora, backup = copiar o lab.db).
-        app.MapPost("/api/backup/export", async (LabDbContext db, LabContent content, TimeProvider clock, CancellationToken ct) => Results.Ok(new
+        // Backup completo em JSON (perfil, desafios, tentativas, avaliações com séries, XP, conquistas e conversas).
+        app.MapPost("/api/backup/export", async (BackupService backup, CancellationToken ct) => Results.Ok(await backup.ExportAsync(ct)))
+            .WithTags("Sistema");
+
+        // Substitui todos os dados pelos do backup; antes, copia o banco atual para backups/.
+        app.MapPost("/api/backup/import", async (BackupFile file, BackupService backup, CancellationToken ct) =>
         {
-            exportedAt = clock.GetUtcNow().UtcDateTime,
-            contentHash = content.ContentHash,
-            profiles = await db.Profiles.AsNoTracking().ToListAsync(ct),
-            challenges = await db.Challenges.AsNoTracking().ToListAsync(ct),
-            attempts = await db.Attempts.AsNoTracking().ToListAsync(ct),
-            evaluations = await db.Evaluations.AsNoTracking().Select(e => new { e.Id, e.AttemptId, e.ChallengeId, e.Kind, e.Status, e.FinalScore, e.Rank, e.ManifestJson, e.CreatedAt, e.CompletedAt }).ToListAsync(ct),
-            xp = await db.XpEntries.AsNoTracking().ToListAsync(ct),
-            progress = await db.UserProgress.AsNoTracking().ToListAsync(ct),
-            competencies = await db.CompetencyRatings.AsNoTracking().ToListAsync(ct),
-            achievements = await db.UserAchievements.AsNoTracking().ToListAsync(ct),
-        })).WithTags("Sistema");
+            try
+            {
+                return Results.Ok(await backup.ImportAsync(file, ct));
+            }
+            catch (BackupException ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest, title: "Backup inválido");
+            }
+        }).WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(512L * 1024 * 1024)).WithTags("Sistema");
 
         app.MapGet("/api/health", (LabContent content) => Results.Ok(new { status = "ok", catalogVersion = content.Catalog.Version, contentHash = content.ContentHash, seeds = content.Seeds.Count }))
             .WithTags("Sistema");

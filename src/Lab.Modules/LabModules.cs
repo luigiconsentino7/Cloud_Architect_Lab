@@ -74,6 +74,7 @@ public static class LabModules
         services.AddSingleton<IReviewNarrator, ReviewNarrator>();
         services.AddSingleton<ILabelMapper, LabelMapper>();
         services.AddScoped<LabelMappingService>();
+        services.AddScoped<BackupService>();
         return services;
     }
 
