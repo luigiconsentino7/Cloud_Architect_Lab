@@ -527,31 +527,31 @@ internal sealed class World
             switch (fault.Type)
             {
                 case FaultType.ZoneOutage:
-                {
-                    var zone = fault.Zone ?? "a";
-                    Kernel.At(Us(fault.At), () => { foreach (var node in Nodes.Values) node.OnZone(zone, true); });
-                    if (fault.For is { } length)
-                        Kernel.At(Us(fault.At + length), () => { foreach (var node in Nodes.Values) node.OnZone(zone, false); });
-                    break;
-                }
+                    {
+                        var zone = fault.Zone ?? "a";
+                        Kernel.At(Us(fault.At), () => { foreach (var node in Nodes.Values) node.OnZone(zone, true); });
+                        if (fault.For is { } length)
+                            Kernel.At(Us(fault.At + length), () => { foreach (var node in Nodes.Values) node.OnZone(zone, false); });
+                        break;
+                    }
 
                 case FaultType.RegionOutage:
-                {
-                    Kernel.At(Us(fault.At), () => { foreach (var node in Nodes.Values) node.OnRegion(true); });
-                    if (fault.For is { } length)
-                        Kernel.At(Us(fault.At + length), () => { foreach (var node in Nodes.Values) node.OnRegion(false); });
-                    break;
-                }
+                    {
+                        Kernel.At(Us(fault.At), () => { foreach (var node in Nodes.Values) node.OnRegion(true); });
+                        if (fault.For is { } length)
+                            Kernel.At(Us(fault.At + length), () => { foreach (var node in Nodes.Values) node.OnRegion(false); });
+                        break;
+                    }
 
                 case FaultType.InstanceKill:
-                {
-                    Kernel.At(Us(fault.At), () =>
                     {
-                        foreach (var node in Nodes.Values.Where(n => Targets(fault.Target, n)))
-                            node.OnInstanceKill(fault.Count ?? 1);
-                    });
-                    break;
-                }
+                        Kernel.At(Us(fault.At), () =>
+                        {
+                            foreach (var node in Nodes.Values.Where(n => Targets(fault.Target, n)))
+                                node.OnInstanceKill(fault.Count ?? 1);
+                        });
+                        break;
+                    }
             }
         }
     }

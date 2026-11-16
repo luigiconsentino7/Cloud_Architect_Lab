@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Rascunho para revisão |
+| **Status** | MVP implementado (ver [11 — Estado da implementação](11-estado-da-implementacao.md)) |
 | **Data** | 15/11/2026 |
 | **Requisitos fixos** | Backend em .NET · **nenhum custo recorrente obrigatório** |
 | **Demais tecnologias** | Propostas com alternativas e justificativas, abertas a questionamento (ver [ADRs](03-arquitetura.md#decisões-de-arquitetura-adrs)) |
@@ -56,6 +56,7 @@ O Cloud Architect Lab é um app de estudo de System Design para quem trabalha no
 | 08 | [Dados e API](08-dados-e-api.md) | Modelo de dados, máquinas de estado, endpoints, eventos em tempo real |
 | 09 | [Qualidade, segurança e operação](09-qualidade-seguranca-operacao.md) | Testes, CI, observabilidade, segurança, privacidade, backup |
 | 10 | [Roadmap e riscos](10-roadmap-e-riscos.md) | Fases, spikes, backlog do MVP, riscos |
+| 11 | [Estado da implementação](11-estado-da-implementacao.md) | O que já existe, desvios em relação à spec e o que falta |
 
 ## Glossário
 

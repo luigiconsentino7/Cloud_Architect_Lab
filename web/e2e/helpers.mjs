@@ -17,13 +17,24 @@ export async function api(path, init) {
 /** Injeta a solução de referência da semente (com as variáveis do desafio) como o desenho da tentativa aberta. */
 export async function injectReference(page, challengeId) {
   const challenge = await api(`/api/challenges/${challengeId}`);
-  const attempt = (await api(`/api/challenges/${challengeId}/attempts`)).at(-1);
   const vars = Object.entries(challenge.variables).map(([k, v]) => `--var=${k}=${v}`).join(' ');
   const twists = (challenge.twists ?? []).map((t) => `--twist ${t}`).join(' ');
   const design = JSON.parse(
     execSync(`${lab} challenge scene ${challenge.seedId} --difficulty ${challenge.difficulty} --provider ${challenge.provider} ${vars} ${twists}`).toString(),
   );
-  await api(`/api/attempts/${attempt.id}/draft`, { method: 'PUT', headers: { ...headers, 'If-Match': `"${attempt.draftVersion}"` }, body: JSON.stringify({ scene: design.scene }) });
+  // O autosave da página (ex.: componentes iniciais) pode salvar entre a leitura da versão e o PUT: relê e tenta de novo.
+  let attempt;
+  for (let tries = 0; ; tries++) {
+    attempt = (await api(`/api/challenges/${challengeId}/attempts`)).at(-1);
+    const response = await fetch(`${base}/api/attempts/${attempt.id}/draft`, {
+      method: 'PUT',
+      headers: { ...headers, 'If-Match': `"${attempt.draftVersion}"` },
+      body: JSON.stringify({ scene: design.scene }),
+    });
+    if (response.ok) break;
+    if (response.status !== 412 || tries >= 5) throw new Error(`PUT draft: ${response.status} ${await response.text()}`);
+    await new Promise((r) => setTimeout(r, 700));
+  }
   await api(`/api/attempts/${attempt.id}/flows`, { method: 'PUT', headers, body: JSON.stringify({ flows: design.flows }) });
   await page.reload();
   await page.waitForSelector('.excalidraw');

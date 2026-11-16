@@ -215,13 +215,13 @@ public static class Simulator
             switch (node.Archetype)
             {
                 case Archetypes.Function when node.Throttled > 0:
-                {
-                    var needed = Math.Ceiling(node.PeakArrivalRps * node.MeanServiceMs / 1000);
-                    found.Add((node.Throttled, new Bottleneck(node.NodeId, "concurrency-limit",
-                        $"\"{node.Label}\" precisou de ~{needed:N0} execuções simultâneas (lei de Little: {node.PeakArrivalRps:N0}/s × {node.MeanServiceMs:N0} ms), mas o limite é {node.ConcurrencyLimit:N0}; {node.Throttled:N0} chamadas foram rejeitadas.",
-                        needed, node.ConcurrencyLimit)));
-                    break;
-                }
+                    {
+                        var needed = Math.Ceiling(node.PeakArrivalRps * node.MeanServiceMs / 1000);
+                        found.Add((node.Throttled, new Bottleneck(node.NodeId, "concurrency-limit",
+                            $"\"{node.Label}\" precisou de ~{needed:N0} execuções simultâneas (lei de Little: {node.PeakArrivalRps:N0}/s × {node.MeanServiceMs:N0} ms), mas o limite é {node.ConcurrencyLimit:N0}; {node.Throttled:N0} chamadas foram rejeitadas.",
+                            needed, node.ConcurrencyLimit)));
+                        break;
+                    }
 
                 case Archetypes.Service or Archetypes.StreamProcessor when node.UtilizationMax >= 0.9 || node.Rejected > 0:
                     found.Add((node.Rejected + (node.UtilizationMax * 1000), new Bottleneck(node.NodeId, "cpu",

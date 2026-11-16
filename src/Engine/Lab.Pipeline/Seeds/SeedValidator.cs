@@ -170,7 +170,10 @@ public static class SeedValidator
                 {
                     yield return new Variation($"{provider.Code()}/{difficulty.ToString().ToLowerInvariant()}/{corner}", new InstantiationRequest
                     {
-                        Seed = seed, Provider = provider, Difficulty = difficulty, Variables = values,
+                        Seed = seed,
+                        Provider = provider,
+                        Difficulty = difficulty,
+                        Variables = values,
                     });
                 }
             }

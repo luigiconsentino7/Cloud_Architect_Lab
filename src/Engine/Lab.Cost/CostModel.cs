@@ -55,97 +55,97 @@ public static class CostModel
             switch (node.Archetype)
             {
                 case Archetypes.Service or Archetypes.StreamProcessor:
-                {
-                    var instances = AverageInstances(node, baseline, peak, peakHours);
-                    var vcpu = cfg.Double("vcpu", 1);
-                    var memory = cfg.Double("memoryGb", 2);
-                    var perInstanceHour = (vcpu * (price.PerVcpuHour ?? 0.0656)) + (memory * (price.PerGbHour ?? 0.0072));
-                    monthly = (instances * perInstanceHour * HoursPerMonth) + (price.FixedMonthly ?? 0);
-                    basis = $"{instances:0.#} instância(s) em média × {vcpu:0.##} vCPU / {memory:0.#} GB × 730 h";
-                    break;
-                }
+                    {
+                        var instances = AverageInstances(node, baseline, peak, peakHours);
+                        var vcpu = cfg.Double("vcpu", 1);
+                        var memory = cfg.Double("memoryGb", 2);
+                        var perInstanceHour = (vcpu * (price.PerVcpuHour ?? 0.0656)) + (memory * (price.PerGbHour ?? 0.0072));
+                        monthly = (instances * perInstanceHour * HoursPerMonth) + (price.FixedMonthly ?? 0);
+                        basis = $"{instances:0.#} instância(s) em média × {vcpu:0.##} vCPU / {memory:0.#} GB × 730 h";
+                        break;
+                    }
 
                 case Archetypes.Function:
-                {
-                    var memoryGb = cfg.Int("memoryMb", 1024) / 1024.0;
-                    var durationSeconds = (baseline?.Nodes.GetValueOrDefault(node.Id)?.MeanServiceMs ?? 50) / 1000;
-                    var gbSeconds = monthlyCalls * durationSeconds * memoryGb;
-                    var provisioned = cfg.Int("provisionedConcurrency", 0) * memoryGb * HoursPerMonth * 3600 * (price.PerGbSecond ?? 0.0000166667) * 0.25;
+                    {
+                        var memoryGb = cfg.Int("memoryMb", 1024) / 1024.0;
+                        var durationSeconds = (baseline?.Nodes.GetValueOrDefault(node.Id)?.MeanServiceMs ?? 50) / 1000;
+                        var gbSeconds = monthlyCalls * durationSeconds * memoryGb;
+                        var provisioned = cfg.Int("provisionedConcurrency", 0) * memoryGb * HoursPerMonth * 3600 * (price.PerGbSecond ?? 0.0000166667) * 0.25;
 
-                    // Consumindo de fila/stream em lotes, cada invocação processa até batchSize mensagens.
-                    var monthlyInvocations = incoming.Sum(e => rates.GetValueOrDefault(e.Id)
-                        / (e.Interaction == Interaction.AsyncConsume ? Math.Max(1, e.Config.BatchSize ?? 1) : 1)) * monthlyFactor;
-                    monthly = (monthlyInvocations / 1e6 * (price.PerMillionRequests ?? 0.2)) + (gbSeconds * (price.PerGbSecond ?? 0.0000166667)) + provisioned;
-                    basis = $"{Millions(monthlyInvocations)} invocações/mês; {Millions(monthlyCalls)} itens × {durationSeconds * 1000:0} ms × {memoryGb:0.##} GB";
-                    break;
-                }
+                        // Consumindo de fila/stream em lotes, cada invocação processa até batchSize mensagens.
+                        var monthlyInvocations = incoming.Sum(e => rates.GetValueOrDefault(e.Id)
+                            / (e.Interaction == Interaction.AsyncConsume ? Math.Max(1, e.Config.BatchSize ?? 1) : 1)) * monthlyFactor;
+                        monthly = (monthlyInvocations / 1e6 * (price.PerMillionRequests ?? 0.2)) + (gbSeconds * (price.PerGbSecond ?? 0.0000166667)) + provisioned;
+                        basis = $"{Millions(monthlyInvocations)} invocações/mês; {Millions(monthlyCalls)} itens × {durationSeconds * 1000:0} ms × {memoryGb:0.##} GB";
+                        break;
+                    }
 
                 case Archetypes.Relational:
-                {
-                    var className = cfg.String("instanceClass") ?? "medium";
-                    var instanceClass = definition.Performance.InstanceClasses?.GetValueOrDefault(className);
-                    var hourly = instanceClass?.PricePerHour ?? 0.82;
-                    var copies = (cfg.Bool("multiAz") ? price.MultiAzFactor ?? 2 : 1) + cfg.Int("readReplicas", 0) + (cfg.Bool("crossRegionReplica") ? 1 : 0);
-                    var storage = cfg.Double("storageGb", workload.StoredGb);
-                    monthly = (hourly * copies * HoursPerMonth) + (storage * (price.PerGbStoredMonth ?? 0.23) * copies) + (cfg.Bool("connectionProxy") ? hourly * 0.15 * HoursPerMonth : 0);
-                    basis = $"classe {className} × {copies:0.#} cópia(s) × 730 h + {storage:0} GB";
-                    break;
-                }
+                    {
+                        var className = cfg.String("instanceClass") ?? "medium";
+                        var instanceClass = definition.Performance.InstanceClasses?.GetValueOrDefault(className);
+                        var hourly = instanceClass?.PricePerHour ?? 0.82;
+                        var copies = (cfg.Bool("multiAz") ? price.MultiAzFactor ?? 2 : 1) + cfg.Int("readReplicas", 0) + (cfg.Bool("crossRegionReplica") ? 1 : 0);
+                        var storage = cfg.Double("storageGb", workload.StoredGb);
+                        monthly = (hourly * copies * HoursPerMonth) + (storage * (price.PerGbStoredMonth ?? 0.23) * copies) + (cfg.Bool("connectionProxy") ? hourly * 0.15 * HoursPerMonth : 0);
+                        basis = $"classe {className} × {copies:0.#} cópia(s) × 730 h + {storage:0} GB";
+                        break;
+                    }
 
                 case Archetypes.RelationalDistributed:
-                {
-                    var nodes = cfg.Int("nodes", 3) * (cfg.Bool("multiRegion") ? 3 : 1);
-                    monthly = (nodes * (price.PerInstanceHour ?? 1.26) * HoursPerMonth) + (workload.StoredGb * (price.PerGbStoredMonth ?? 0.39));
-                    basis = $"{nodes} nó(s) × 730 h";
-                    break;
-                }
+                    {
+                        var nodes = cfg.Int("nodes", 3) * (cfg.Bool("multiRegion") ? 3 : 1);
+                        monthly = (nodes * (price.PerInstanceHour ?? 1.26) * HoursPerMonth) + (workload.StoredGb * (price.PerGbStoredMonth ?? 0.39));
+                        basis = $"{nodes} nó(s) × 730 h";
+                        break;
+                    }
 
                 case Archetypes.KeyValue or Archetypes.Document or Archetypes.ObjectStorage:
-                {
-                    var (reads, writes) = Operations(incoming, rates);
-                    var monthlyReads = reads * monthlyFactor;
-                    var monthlyWrites = writes * monthlyFactor;
-                    var storage = durableStores == 0 ? 0 : workload.StoredGb / durableStores;
-                    var replicas = cfg.Bool("globalTables") ? 2 : 1;
-                    monthly = ((monthlyReads / 1e6 * (price.PerMillionReads ?? 0.19)) + (monthlyWrites / 1e6 * (price.PerMillionWrites ?? 0.94)) + (storage * (price.PerGbStoredMonth ?? 0.25))) * replicas;
-                    basis = $"{Millions(monthlyReads)} leituras + {Millions(monthlyWrites)} escritas/mês + {storage:0} GB";
-                    break;
-                }
+                    {
+                        var (reads, writes) = Operations(incoming, rates);
+                        var monthlyReads = reads * monthlyFactor;
+                        var monthlyWrites = writes * monthlyFactor;
+                        var storage = durableStores == 0 ? 0 : workload.StoredGb / durableStores;
+                        var replicas = cfg.Bool("globalTables") ? 2 : 1;
+                        monthly = ((monthlyReads / 1e6 * (price.PerMillionReads ?? 0.19)) + (monthlyWrites / 1e6 * (price.PerMillionWrites ?? 0.94)) + (storage * (price.PerGbStoredMonth ?? 0.25))) * replicas;
+                        basis = $"{Millions(monthlyReads)} leituras + {Millions(monthlyWrites)} escritas/mês + {storage:0} GB";
+                        break;
+                    }
 
                 case Archetypes.Cache:
-                {
-                    var nodes = cfg.Int("nodes", 1) * (1 + cfg.Int("replicas", 0));
-                    monthly = nodes * (price.PerInstanceHour ?? 0.25) * HoursPerMonth;
-                    basis = $"{nodes} nó(s) × 730 h";
-                    break;
-                }
+                    {
+                        var nodes = cfg.Int("nodes", 1) * (1 + cfg.Int("replicas", 0));
+                        monthly = nodes * (price.PerInstanceHour ?? 0.25) * HoursPerMonth;
+                        basis = $"{nodes} nó(s) × 730 h";
+                        break;
+                    }
 
                 case Archetypes.Queue:
-                {
-                    // Envio por mensagem; leitura e remoção por lote.
-                    var batch = graph.Outgoing(node.Id).Where(e => e.Interaction == Interaction.AsyncConsume)
-                        .Select(e => Math.Max(1, e.Config.BatchSize ?? 1)).DefaultIfEmpty(1).Max();
-                    var callsPerMessage = 1 + (2.0 / batch);
-                    monthly = monthlyCalls * callsPerMessage / 1e6 * (price.PerMillionRequests ?? 0.5);
-                    basis = $"{Millions(monthlyCalls)} mensagens/mês × {callsPerMessage:0.##} chamadas (envio + leitura e remoção em lotes de {batch})";
-                    break;
-                }
+                    {
+                        // Envio por mensagem; leitura e remoção por lote.
+                        var batch = graph.Outgoing(node.Id).Where(e => e.Interaction == Interaction.AsyncConsume)
+                            .Select(e => Math.Max(1, e.Config.BatchSize ?? 1)).DefaultIfEmpty(1).Max();
+                        var callsPerMessage = 1 + (2.0 / batch);
+                        monthly = monthlyCalls * callsPerMessage / 1e6 * (price.PerMillionRequests ?? 0.5);
+                        basis = $"{Millions(monthlyCalls)} mensagens/mês × {callsPerMessage:0.##} chamadas (envio + leitura e remoção em lotes de {batch})";
+                        break;
+                    }
 
                 case Archetypes.Topic or Archetypes.EventBus:
-                {
-                    var subscriptions = Math.Max(1, graph.Outgoing(node.Id).Count());
-                    monthly = monthlyCalls * subscriptions / 1e6 * (price.PerMillionRequests ?? 0.5);
-                    basis = $"{Millions(monthlyCalls)} publicações/mês × {subscriptions} assinatura(s)";
-                    break;
-                }
+                    {
+                        var subscriptions = Math.Max(1, graph.Outgoing(node.Id).Count());
+                        monthly = monthlyCalls * subscriptions / 1e6 * (price.PerMillionRequests ?? 0.5);
+                        basis = $"{Millions(monthlyCalls)} publicações/mês × {subscriptions} assinatura(s)";
+                        break;
+                    }
 
                 case Archetypes.Stream:
-                {
-                    var partitions = cfg.Int("partitions", 4);
-                    monthly = (partitions * (price.PerPartitionHour ?? 0.021) * HoursPerMonth) + (monthlyCalls / 1e6 * (price.PerMillionRequests ?? 0.02));
-                    basis = $"{partitions} partição(ões) × 730 h + {Millions(monthlyCalls)} registros/mês";
-                    break;
-                }
+                    {
+                        var partitions = cfg.Int("partitions", 4);
+                        monthly = (partitions * (price.PerPartitionHour ?? 0.021) * HoursPerMonth) + (monthlyCalls / 1e6 * (price.PerMillionRequests ?? 0.02));
+                        basis = $"{partitions} partição(ões) × 730 h + {Millions(monthlyCalls)} registros/mês";
+                        break;
+                    }
 
                 case Archetypes.LoadBalancer:
                     monthly = ((price.PerInstanceHour ?? 0.0378) * HoursPerMonth) + (monthlyCalls / 1e6 * (price.PerMillionRequests ?? 0.8));

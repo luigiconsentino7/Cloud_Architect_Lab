@@ -1,0 +1,158 @@
+# CI do Cloud Architect Lab (spec 09). Nunca chama LLM: o modo com IA roda contra um Ollama de mentira.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+
+jobs:
+  dotnet:
+    name: .NET — build, formato, testes e conteúdo
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restaurar
+        run: dotnet restore CloudArchitectLab.slnx
+      - name: Build (warnings viram erro)
+        run: dotnet build CloudArchitectLab.slnx --no-restore
+      - name: Formatação
+        run: dotnet format CloudArchitectLab.slnx --verify-no-changes --no-restore
+      - name: Testes (motor, conteúdo, IA, app e arquitetura)
+        run: dotnet test --solution CloudArchitectLab.slnx --no-build
+      - name: Conteúdo — textos das regras e catálogo
+        run: |
+          dotnet src/Lab.Cli/bin/Debug/net10.0/lab.dll rules validate
+          dotnet src/Lab.Cli/bin/Debug/net10.0/lab.dll catalog validate
+      - name: Conteúdo — sementes (referência ≥ 85, validação rápida)
+        run: dotnet src/Lab.Cli/bin/Debug/net10.0/lab.dll challenge validate --quick
+      - name: Pacotes NuGet vulneráveis
+        run: |
+          dotnet package list --project CloudArchitectLab.slnx --vulnerable --include-transitive | tee vulneraveis.txt
+          if grep -q "has the following vulnerable packages" vulneraveis.txt; then exit 1; fi
+
+  web:
+    name: Frontend — testes, build e auditoria
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Testes (Vitest)
+        run: npm test -- --watch=false
+      - name: Build de produção
+        run: npm run build
+      - name: Auditoria de dependências
+        run: npm audit --audit-level=high
+
+  e2e:
+    name: E2E — Playwright (sem IA e com Ollama simulado)
+    needs: [dotnet, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Dependências do frontend e Chromium
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: SPA dentro do app
+        working-directory: web
+        run: npm run build:app
+      - name: Build do app e do CLI
+        run: |
+          dotnet build src/Lab.App/Lab.App.csproj
+          dotnet build src/Lab.Cli/Lab.Cli.csproj
+      - name: Jornadas no modo sem IA
+        run: |
+          Ai__Mode=none Lab__OpenBrowser=false Lab__DataDirectory="$RUNNER_TEMP/lab-none" Lab__EventBudget=4000000 \
+            dotnet src/Lab.App/bin/Debug/net10.0/Lab.App.dll --contentRoot src/Lab.App > "$RUNNER_TEMP/app-sem-ia.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/app.pid"
+          timeout 90 bash -c 'until curl -sf http://localhost:5080/api/health > /dev/null; do sleep 1; done'
+          (cd web && E2E_SCREENSHOTS="$RUNNER_TEMP/screenshots" npm run e2e)
+          kill "$(cat "$RUNNER_TEMP/app.pid")"
+      - name: Jornadas no modo com IA (Ollama de mentira, cliente real do OllamaSharp)
+        run: |
+          timeout 30 bash -c 'while curl -sf http://localhost:5080/api/health > /dev/null; do sleep 1; done'
+          Ai__Mode=ollama Ai__Ollama__Endpoint=http://127.0.0.1:11999 Lab__OpenBrowser=false Lab__DataDirectory="$RUNNER_TEMP/lab-ia" \
+            Lab__EventBudget=4000000 dotnet src/Lab.App/bin/Debug/net10.0/Lab.App.dll --contentRoot src/Lab.App > "$RUNNER_TEMP/app-com-ia.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/app.pid"
+          timeout 90 bash -c 'until curl -sf http://localhost:5080/api/health > /dev/null; do sleep 1; done'
+          (cd web && E2E_SCREENSHOTS="$RUNNER_TEMP/screenshots" npm run e2e:ai)
+          kill "$(cat "$RUNNER_TEMP/app.pid")"
+      - name: Capturas de tela e logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e
+          path: |
+            ${{ runner.temp }}/screenshots
+            ${{ runner.temp }}/app-*.log
+          if-no-files-found: ignore
+
+  publish:
+    name: Executável — ${{ matrix.rid }}
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        rid: [win-x64, linux-x64, osx-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: SPA dentro do app
+        working-directory: web
+        run: |
+          npm ci
+          npm run build:app
+      - name: Publicar arquivo único (com o runtime, sem precisar do .NET instalado)
+        run: >-
+          dotnet publish src/Lab.App/Lab.App.csproj -c Release -r ${{ matrix.rid }} --self-contained
+          -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false -o publish/${{ matrix.rid }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloud-architect-lab-${{ matrix.rid }}
+          path: publish/${{ matrix.rid }}

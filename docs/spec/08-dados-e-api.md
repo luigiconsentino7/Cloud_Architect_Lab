@@ -1,5 +1,7 @@
 # 08 — Dados e API
 
+> **Implementação:** as diferenças dos endpoints e dos eventos em relação a este documento estão em [11 — Estado da implementação](11-estado-da-implementacao.md).
+
 ## Modelo de dados
 
 SQLite, um arquivo, tabelas com prefixo por módulo. IDs UUIDv7 (`Guid.CreateVersion7()`), ordenáveis por tempo. JSON em colunas `TEXT`; séries temporais comprimidas (gzip) em `BLOB`. Sementes, catálogo, textos das regras e prompts **não** ficam no banco: são arquivos do repositório carregados na inicialização, com hash de versão.

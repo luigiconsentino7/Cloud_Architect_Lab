@@ -30,7 +30,10 @@ export class CanvasComponent implements OnDestroy {
   readonly readOnly = input(false);
 
   /** Emitido quando algum elemento muda (não a cada movimento do mouse). */
+  /** O usuário (ou o app, a pedido dele) mudou o desenho: o workspace salva. */
   readonly sceneChange = output<readonly SceneElement[]>();
+  /** Cena carregada ou só remedida (abertura, fonte que terminou de carregar): atualiza os painéis, sem salvar. */
+  readonly sceneLoad = output<readonly SceneElement[]>();
   readonly selectionChange = output<string[]>();
 
   protected readonly loading = signal(true);
@@ -40,6 +43,7 @@ export class CanvasComponent implements OnDestroy {
   private excalidraw?: ExcalidrawModule;
   private lastSignature = '';
   private lastSelection = '';
+  private measuring = false;
 
   constructor() {
     afterNextRender(() => void this.mount());
@@ -128,6 +132,7 @@ export class CanvasComponent implements OnDestroy {
           this.loading.set(false);
           // Enquadra o desenho todo ao abrir (o scrollToContent do initialData só centraliza em 100%).
           if (initialElements.length > 0) setTimeout(() => api.scrollToContent(undefined, { fitToContent: true }), 50);
+          void this.refreshTextWhenFontLoads();
         },
         onChange: (elements, appState) => this.onChange(elements as unknown as readonly SceneElement[], Object.keys(appState.selectedElementIds ?? {})),
         langCode: 'pt-BR',
@@ -135,6 +140,24 @@ export class CanvasComponent implements OnDestroy {
         UIOptions: { canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: true } },
       }),
     );
+  }
+
+  /**
+   * Textos criados antes de a fonte manuscrita carregar foram medidos com a fonte reserva (mais estreita) e saem
+   * cortados nas pontas. Quando a Excalifont carrega, mede tudo de novo (o Excalidraw só redesenha, não remede).
+   */
+  private async refreshTextWhenFontLoads(): Promise<void> {
+    for (let i = 0; i < 50 && !excalifontLoaded(); i++) await new Promise((resolve) => setTimeout(resolve, 200));
+    if (!this.api || !this.excalidraw) return;
+    const elements = this.api.getSceneElementsIncludingDeleted();
+    if (!elements.some((e) => e.type === 'text' && !e.isDeleted)) return;
+    // Remedir texto não é edição do usuário: a mudança sai como carga, sem marcar o rascunho nem disparar o autosave.
+    this.measuring = true;
+    this.api.updateScene({
+      elements: this.excalidraw.restoreElements(elements, null, { refreshDimensions: true, repairBindings: true }),
+      captureUpdate: this.excalidraw.CaptureUpdateAction.NEVER,
+    });
+    setTimeout(() => (this.measuring = false), 300);
   }
 
   private onChange(elements: readonly SceneElement[], selected: string[]): void {
@@ -146,6 +169,7 @@ export class CanvasComponent implements OnDestroy {
 
     const signature = sceneSignature(elements);
     if (signature === this.lastSignature) return;
+    const loading = this.lastSignature === '' || this.measuring;
     this.lastSignature = signature;
     if (!this.readOnly()) {
       // Setas novas ganham id de conexão estável antes de qualquer um usá-las nos fluxos.
@@ -156,8 +180,17 @@ export class CanvasComponent implements OnDestroy {
       }
     }
 
-    this.sceneChange.emit(elements);
+    if (loading) this.sceneLoad.emit(elements);
+    else this.sceneChange.emit(elements);
   }
+}
+
+function excalifontLoaded(): boolean {
+  let loaded = false;
+  document.fonts.forEach((face) => {
+    if (face.family.replace(/["']/g, '') === 'Excalifont' && face.status === 'loaded') loaded = true;
+  });
+  return loaded;
 }
 
 function interop<T>(module: T): T {

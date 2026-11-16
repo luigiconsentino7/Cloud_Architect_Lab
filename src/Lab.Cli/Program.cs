@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using Lab.Cli;
 using Lab.Content;
 using Lab.Pipeline.Seeds;

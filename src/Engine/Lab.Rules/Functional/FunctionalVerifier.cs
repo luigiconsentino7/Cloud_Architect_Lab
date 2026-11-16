@@ -91,95 +91,95 @@ public static class FunctionalVerifier
         switch (requirement.Capability)
         {
             case "authenticate":
-            {
-                var auth = calls.Where(c =>
-                    (c.Target.Archetype == Archetypes.ApiGateway && c.Target.Cfg.String("auth") is { } mode && mode != "none")
-                    || c.Target.Archetype == Archetypes.Identity
-                    || c.Target.Responsibilities.Contains("authenticate")).ToList();
-                return auth.Count > 0
-                    ? Result(true, $"Autenticação em \"{auth[0].Target.Label}\".", auth)
-                    : Result(false, $"Nenhum passo autentica o cliente{where} (gateway com autenticação, provedor de identidade ou serviço com a responsabilidade).");
-            }
+                {
+                    var auth = calls.Where(c =>
+                        (c.Target.Archetype == Archetypes.ApiGateway && c.Target.Cfg.String("auth") is { } mode && mode != "none")
+                        || c.Target.Archetype == Archetypes.Identity
+                        || c.Target.Responsibilities.Contains("authenticate")).ToList();
+                    return auth.Count > 0
+                        ? Result(true, $"Autenticação em \"{auth[0].Target.Label}\".", auth)
+                        : Result(false, $"Nenhum passo autentica o cliente{where} (gateway com autenticação, provedor de identidade ou serviço com a responsabilidade).");
+                }
 
             case "idempotency-check":
-            {
-                var entry = plan.Root?.Children.FirstOrDefault();
-                var atomic = calls.Where(c => c.Edge!.Interaction == Interaction.DataAccess && c.Edge.Config.HasAtomicWrite && Archetypes.IsDurableData(c.Target.Archetype)).ToList();
-                if (entry?.Edge!.Config.IdempotencyKey != true)
-                    return Result(false, "A chamada de entrada não carrega chave de idempotência.");
-                return atomic.Count > 0
-                    ? Result(true, $"Chave de idempotência verificada com escrita atômica em \"{atomic[0].Target.Label}\".", atomic.Prepend(entry))
-                    : Result(false, $"A chave de idempotência chega, mas nenhum passo{where} faz escrita condicional ou transação para verificá-la.", [entry]);
-            }
+                {
+                    var entry = plan.Root?.Children.FirstOrDefault();
+                    var atomic = calls.Where(c => c.Edge!.Interaction == Interaction.DataAccess && c.Edge.Config.HasAtomicWrite && Archetypes.IsDurableData(c.Target.Archetype)).ToList();
+                    if (entry?.Edge!.Config.IdempotencyKey != true)
+                        return Result(false, "A chamada de entrada não carrega chave de idempotência.");
+                    return atomic.Count > 0
+                        ? Result(true, $"Chave de idempotência verificada com escrita atômica em \"{atomic[0].Target.Label}\".", atomic.Prepend(entry))
+                        : Result(false, $"A chave de idempotência chega, mas nenhum passo{where} faz escrita condicional ou transação para verificá-la.", [entry]);
+                }
 
             case "durable-write":
-            {
-                var writes = calls.Where(c => c.Edge!.Interaction == Interaction.DataAccess && c.Edge.Config.HasWrite && Archetypes.IsDurableData(c.Target.Archetype)).ToList();
-                return writes.Count > 0
-                    ? Result(true, $"Gravação durável em \"{writes[0].Target.Label}\"{where}.", writes)
-                    : Result(false, $"Nenhuma gravação em armazenamento durável{where} (cache não conta).");
-            }
+                {
+                    var writes = calls.Where(c => c.Edge!.Interaction == Interaction.DataAccess && c.Edge.Config.HasWrite && Archetypes.IsDurableData(c.Target.Archetype)).ToList();
+                    return writes.Count > 0
+                        ? Result(true, $"Gravação durável em \"{writes[0].Target.Label}\"{where}.", writes)
+                        : Result(false, $"Nenhuma gravação em armazenamento durável{where} (cache não conta).");
+                }
 
             case "atomic-balance-update":
-            {
-                var atomic = calls.Where(c => c.Edge!.Interaction == Interaction.DataAccess && c.Edge.Config.HasAtomicWrite
-                    && (context.Definition(c.Target).Has("transactions") || context.Definition(c.Target).Has("conditionalWrites"))).ToList();
-                return atomic.Count > 0
-                    ? Result(true, $"Saldo atualizado com operação atômica em \"{atomic[0].Target.Label}\".", atomic)
-                    : Result(false, $"Nenhuma transação ou escrita condicional{where} para atualizar o saldo.");
-            }
+                {
+                    var atomic = calls.Where(c => c.Edge!.Interaction == Interaction.DataAccess && c.Edge.Config.HasAtomicWrite
+                        && (context.Definition(c.Target).Has("transactions") || context.Definition(c.Target).Has("conditionalWrites"))).ToList();
+                    return atomic.Count > 0
+                        ? Result(true, $"Saldo atualizado com operação atômica em \"{atomic[0].Target.Label}\".", atomic)
+                        : Result(false, $"Nenhuma transação ou escrita condicional{where} para atualizar o saldo.");
+                }
 
             case "publish-event":
-            {
-                var publish = calls.Where(c => c.Edge!.Interaction is Interaction.AsyncPublish or Interaction.Cdc).ToList();
-                return publish.Count > 0
-                    ? Result(true, $"Evento publicado em \"{publish[0].Target.Label}\".", publish)
-                    : Result(false, "Nenhum evento é publicado (fila, tópico, stream ou CDC).");
-            }
+                {
+                    var publish = calls.Where(c => c.Edge!.Interaction is Interaction.AsyncPublish or Interaction.Cdc).ToList();
+                    return publish.Count > 0
+                        ? Result(true, $"Evento publicado em \"{publish[0].Target.Label}\".", publish)
+                        : Result(false, "Nenhum evento é publicado (fila, tópico, stream ou CDC).");
+                }
 
             case "external-call":
-            {
-                var target = requirement.Target ?? "";
-                var external = calls.Where(c => c.Target.Id == target && c.Edge!.Interaction == Interaction.SyncRequest).ToList();
-                var name = context.Challenge.FindExternal(target)?.Name ?? target;
-                return external.Count > 0
-                    ? Result(true, $"Chamada a {name}.", external)
-                    : Result(false, $"O fluxo não chama {name}{where}.");
-            }
+                {
+                    var target = requirement.Target ?? "";
+                    var external = calls.Where(c => c.Target.Id == target && c.Edge!.Interaction == Interaction.SyncRequest).ToList();
+                    var name = context.Challenge.FindExternal(target)?.Name ?? target;
+                    return external.Count > 0
+                        ? Result(true, $"Chamada a {name}.", external)
+                        : Result(false, $"O fluxo não chama {name}{where}.");
+                }
 
             case "notify":
-            {
-                var notify = calls.Where(c => (Archetypes.IsExternal(c.Target.Archetype) && context.Challenge.FindExternal(c.Target.Id)?.SideEffect == true)
-                    || c.Target.Responsibilities.Contains("notify")).ToList();
-                return notify.Count > 0
-                    ? Result(true, $"Notificação enviada por \"{notify[0].Target.Label}\".", notify)
-                    : Result(false, "Nenhum passo envia a notificação.");
-            }
+                {
+                    var notify = calls.Where(c => (Archetypes.IsExternal(c.Target.Archetype) && context.Challenge.FindExternal(c.Target.Id)?.SideEffect == true)
+                        || c.Target.Responsibilities.Contains("notify")).ToList();
+                    return notify.Count > 0
+                        ? Result(true, $"Notificação enviada por \"{notify[0].Target.Label}\".", notify)
+                        : Result(false, "Nenhum passo envia a notificação.");
+                }
 
             case "audit-log":
-            {
-                var audit = calls.Where(c => c.Edge!.Interaction == Interaction.DataAccess && c.Edge.Config.HasWrite && AuditTrailRule.IsImmutable(context, c.Target)).ToList();
-                return audit.Count > 0
-                    ? Result(true, $"Trilha de auditoria imutável em \"{audit[0].Target.Label}\".", audit)
-                    : Result(false, "Nenhuma gravação em armazenamento imutável (append-only/WORM) para auditoria.");
-            }
+                {
+                    var audit = calls.Where(c => c.Edge!.Interaction == Interaction.DataAccess && c.Edge.Config.HasWrite && AuditTrailRule.IsImmutable(context, c.Target)).ToList();
+                    return audit.Count > 0
+                        ? Result(true, $"Trilha de auditoria imutável em \"{audit[0].Target.Label}\".", audit)
+                        : Result(false, "Nenhuma gravação em armazenamento imutável (append-only/WORM) para auditoria.");
+                }
 
             case "read-from-cache":
-            {
-                var cache = calls.Where(c => c.Target.Archetype == Archetypes.Cache).ToList();
-                return cache.Count > 0
-                    ? Result(true, $"Leitura servida por \"{cache[0].Target.Label}\".", cache)
-                    : Result(false, "O fluxo não lê de um cache.");
-            }
+                {
+                    var cache = calls.Where(c => c.Target.Archetype == Archetypes.Cache).ToList();
+                    return cache.Count > 0
+                        ? Result(true, $"Leitura servida por \"{cache[0].Target.Label}\".", cache)
+                        : Result(false, "O fluxo não lê de um cache.");
+                }
 
             default:
-            {
-                var responsible = calls.Where(c => c.Target.Responsibilities.Contains(requirement.Capability)).ToList();
-                var description = requirement.Description ?? requirement.Capability;
-                return responsible.Count > 0
-                    ? Result(true, $"\"{responsible[0].Target.Label}\" cumpre: {description}.", responsible)
-                    : Result(false, $"Nenhum componente do fluxo{where} tem a responsabilidade \"{description}\" marcada no inspector.");
-            }
+                {
+                    var responsible = calls.Where(c => c.Target.Responsibilities.Contains(requirement.Capability)).ToList();
+                    var description = requirement.Description ?? requirement.Capability;
+                    return responsible.Count > 0
+                        ? Result(true, $"\"{responsible[0].Target.Label}\" cumpre: {description}.", responsible)
+                        : Result(false, $"Nenhum componente do fluxo{where} tem a responsabilidade \"{description}\" marcada no inspector.");
+                }
         }
     }
 

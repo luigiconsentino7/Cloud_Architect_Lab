@@ -6,6 +6,7 @@ import {
   connectionIdOf,
   elementsForIrIds,
   freePosition,
+  labelWidth,
   needsRestore,
   selectionOf,
   toSkeletons,
@@ -117,6 +118,18 @@ describe('canvas-adapter', () => {
     expect(link['start']).toEqual({ id: 'el_app' });
     expect(link['points']).toBeDefined();
     expect(link['x']).toBe(166);
+  });
+
+  it('alarga a caixa quando o rótulo não cabe e liga a seta na borda nova', () => {
+    const wide = [...box('dedupe', 'aws.dynamodb', 'dedupe-notificacoes', 0), ...box('push', 'external.system', 'Push', 400), arrow('e9', 'dedupe', 'push')];
+    const skeletons = toSkeletons(wide);
+    const dedupe = skeletons.find((s) => s['id'] === 'el_dedupe')!;
+    const link = skeletons.find((s) => s['id'] === 'arrow_e9')!;
+
+    expect(dedupe['width']).toBe(labelWidth('dedupe-notificacoes'));
+    expect(dedupe['width']).toBeGreaterThan(160);
+    expect(link['x']).toBe((dedupe['width'] as number) + 6);
+    expect(skeletons.find((s) => s['id'] === 'el_push')!['width']).toBe(160);
   });
 
   it('sugere o fluxo percorrendo as setas a partir do cliente de entrada', () => {

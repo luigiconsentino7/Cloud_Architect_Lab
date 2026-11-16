@@ -107,7 +107,10 @@ public sealed class RuleEngineTests
         var challenge = Pix.Challenge();
         var compiled = SceneCompiler.Compile(new SceneCompileRequest
         {
-            Scene = s.Build(), Provider = CloudProvider.Aws, Catalog = TestContent.Get().Catalog, Challenge = challenge,
+            Scene = s.Build(),
+            Provider = CloudProvider.Aws,
+            Catalog = TestContent.Get().Catalog,
+            Challenge = challenge,
         });
 
         RuleEngine.Run(new RuleContext(compiled.Graph, challenge, TestContent.Get().Catalog))
@@ -127,7 +130,10 @@ public sealed class RuleEngineTests
         var challenge = Pix.Challenge();
         var compiled = SceneCompiler.Compile(new SceneCompileRequest
         {
-            Scene = s.Build(), Provider = CloudProvider.Aws, Catalog = TestContent.Get().Catalog, Challenge = challenge,
+            Scene = s.Build(),
+            Provider = CloudProvider.Aws,
+            Catalog = TestContent.Get().Catalog,
+            Challenge = challenge,
         });
 
         RuleEngine.Run(new RuleContext(compiled.Graph, challenge, TestContent.Get().Catalog))

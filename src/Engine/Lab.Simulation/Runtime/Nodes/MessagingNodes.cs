@@ -384,8 +384,12 @@ internal sealed class StreamNode : SimNode, IBroker
                 {
                     state.Log.AddFirst(new Message
                     {
-                        Request = message.Request, Publish = message.Publish, Consumer = message.Consumer,
-                        Partition = partition, Duplicate = true, EnqueuedUs = K.Now,
+                        Request = message.Request,
+                        Publish = message.Publish,
+                        Consumer = message.Consumer,
+                        Partition = partition,
+                        Duplicate = true,
+                        EnqueuedUs = K.Now,
                     });
                 }
 

@@ -97,7 +97,10 @@ public static class Pix
         var gw = s.Component("aws.apigateway", "API PIX", id: "gw", config: new { auth = "jwt", waf = true, throttle = new { rps = 20000, burst = 10000 } });
         var svc = s.Component("aws.ecs-fargate", "pix-service", id: "svc", config: new
         {
-            instances = new { min = 15, max = 40 }, vcpu = 2, concurrencyPerInstance = 200, zones = new[] { "a", "b", "c" },
+            instances = new { min = 15, max = 40 },
+            vcpu = 2,
+            concurrencyPerInstance = 200,
+            zones = new[] { "a", "b", "c" },
             observability = new { metrics = true, logs = true, tracing = true, alarms = true },
         });
         var db = s.Component("aws.aurora-postgresql", "ledger", id: "db", config: new { instanceClass = "xlarge", multiAz = true, readReplicas = 1 });
@@ -107,7 +110,8 @@ public static class Pix
         var pending = s.Component("aws.sqs", "pendencias", id: "pending", config: new { dlq = new { enabled = true, maxReceiveCount = 5 }, observability = new { alarms = true } });
         var notifier = s.Component("aws.lambda", "notificador", id: "notifier", config: new
         {
-            reservedConcurrency = 800, idempotency = new { enabled = true, storeNodeId = "dedupe" },
+            reservedConcurrency = 800,
+            idempotency = new { enabled = true, storeNodeId = "dedupe" },
             observability = new { metrics = true, logs = true, tracing = true },
         });
         s.Component("external.system", "Push", id: "push_box", externalId: "external:push");

@@ -44,31 +44,31 @@ public sealed class LoadCurve
         switch (load.Profile)
         {
             case LoadShape.Ramp:
-            {
-                var from = load.FromRps ?? baseline;
-                var to = load.ToRps ?? from;
-                var ramp = Scale(load.RampFor ?? 30);
-                var hold = Scale(load.HoldFor ?? 60);
-                return new LoadCurve(warmup, warmup + ramp + hold, Math.Max(from, to), t =>
-                    t < warmup ? from : t < warmup + ramp ? from + ((to - from) * (t - warmup) / ramp) : to);
-            }
+                {
+                    var from = load.FromRps ?? baseline;
+                    var to = load.ToRps ?? from;
+                    var ramp = Scale(load.RampFor ?? 30);
+                    var hold = Scale(load.HoldFor ?? 60);
+                    return new LoadCurve(warmup, warmup + ramp + hold, Math.Max(from, to), t =>
+                        t < warmup ? from : t < warmup + ramp ? from + ((to - from) * (t - warmup) / ramp) : to);
+                }
 
             case LoadShape.Spike:
-            {
-                var @base = load.BaseRps ?? baseline;
-                var peak = load.PeakRps ?? (@base * 10);
-                var at = load.At ?? (warmup + 30);
-                var length = load.For ?? 20;
-                var total = Math.Max(at + length + 20, warmup + Scale((load.Duration ?? 120) - warmup));
-                return new LoadCurve(warmup, total, Math.Max(@base, peak), t => t >= at && t < at + length ? peak : @base);
-            }
+                {
+                    var @base = load.BaseRps ?? baseline;
+                    var peak = load.PeakRps ?? (@base * 10);
+                    var at = load.At ?? (warmup + 30);
+                    var length = load.For ?? 20;
+                    var total = Math.Max(at + length + 20, warmup + Scale((load.Duration ?? 120) - warmup));
+                    return new LoadCurve(warmup, total, Math.Max(@base, peak), t => t >= at && t < at + length ? peak : @base);
+                }
 
             default:
-            {
-                var rps = load.Rps ?? baseline;
-                var duration = Scale(load.Duration ?? 60);
-                return new LoadCurve(warmup, warmup + duration, rps, _ => rps);
-            }
+                {
+                    var rps = load.Rps ?? baseline;
+                    var duration = Scale(load.Duration ?? 60);
+                    return new LoadCurve(warmup, warmup + duration, rps, _ => rps);
+                }
         }
     }
 

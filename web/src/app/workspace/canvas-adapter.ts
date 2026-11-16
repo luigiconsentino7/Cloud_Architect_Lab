@@ -258,13 +258,15 @@ export function toSkeletons(elements: readonly SceneElement[]): Record<string, u
     const siblings = pairs.get([from.id, to.id].sort().join('|')) ?? [arrow.id];
     return (siblings.indexOf(arrow.id) - (siblings.length - 1) / 2) * 16;
   };
+  // Rótulo longo alarga a caixa (o motor desenha todas com 160 px); as setas usam a largura nova.
+  const box = (e: SceneElement): SceneElement => (labels.has(e.id) ? { ...e, width: Math.max(e.width, labelWidth(labels.get(e.id)!)) } : e);
   for (const e of items) {
     if (e.type === 'text' && e.containerId) continue;
     const common = { id: e.id, x: e.x, y: e.y, customData: e.customData, groupIds: e.groupIds ?? [] };
     if (e.type === 'arrow') {
       const from = e.startBinding ? byId.get(e.startBinding.elementId) : undefined;
       const to = e.endBinding ? byId.get(e.endBinding.elementId) : undefined;
-      const geometry = from && to ? arrowGeometry(from, to, pairOffset(e, from, to)) : {};
+      const geometry = from && to ? arrowGeometry(box(from), box(to), pairOffset(e, from, to)) : {};
       skeletons.push({
         ...common,
         ...geometry,
@@ -282,7 +284,7 @@ export function toSkeletons(elements: readonly SceneElement[]): Record<string, u
       skeletons.push({
         ...common,
         type: e.type,
-        width: e.width,
+        width: box(e).width,
         height: e.height,
         backgroundColor: component ? (component.externalId ? colorFor('externos') : '#f1f3f5') : 'transparent',
         fillStyle: 'solid',
@@ -292,6 +294,11 @@ export function toSkeletons(elements: readonly SceneElement[]): Record<string, u
     }
   }
   return skeletons;
+}
+
+/** Largura que cabe o rótulo numa linha, na fonte manuscrita do Excalidraw a 16 px (estimativa folgada). */
+export function labelWidth(label: string): number {
+  return Math.round(label.length * 9.5) + 32;
 }
 
 /**

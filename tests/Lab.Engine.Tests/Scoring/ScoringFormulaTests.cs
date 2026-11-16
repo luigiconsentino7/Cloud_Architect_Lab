@@ -61,7 +61,11 @@ public sealed class ScoringFormulaTests
         first.AttemptXp.ShouldBe(241);
         var second = XpCalculator.Compute(new XpInput
         {
-            Difficulty = Difficulty.Senior, Score = 88, Rank = "A", FirstAttempt = false, PreviousBestXp = first.AttemptXp,
+            Difficulty = Difficulty.Senior,
+            Score = 88,
+            Rank = "A",
+            FirstAttempt = false,
+            PreviousBestXp = first.AttemptXp,
         });
         second.AttemptXp.ShouldBe(318);
         second.Credited.ShouldBe(77);

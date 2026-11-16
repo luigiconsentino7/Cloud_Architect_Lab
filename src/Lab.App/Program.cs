@@ -6,7 +6,14 @@ using Lab.Modules.Shared.Http;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
-var builder = WebApplication.CreateBuilder(args);
+// Executável publicado: o wwwroot e o content/ ficam ao lado dele, não no diretório de onde ele foi aberto.
+var published = !args.Any(a => a.StartsWith("--contentRoot", StringComparison.OrdinalIgnoreCase))
+    && File.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot", "index.html"));
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = published ? AppContext.BaseDirectory : null,
+});
 
 // Só na própria máquina: 127.0.0.1 / ::1 (spec 09). O WebApplicationFactory dos testes ignora o Kestrel.
 var port = builder.Configuration.GetValue("Lab:Port", 5080);
@@ -51,7 +58,23 @@ app.MapLabEndpoints();
 if (File.Exists(Path.Combine(app.Environment.WebRootPath ?? Path.Combine(AppContext.BaseDirectory, "wwwroot"), "index.html")))
     app.MapFallbackToFile("index.html");
 
+// No desktop, o executável abre o app no navegador padrão (desligado em desenvolvimento, testes e CI).
+if (builder.Configuration.GetValue("Lab:OpenBrowser", false))
+    app.Lifetime.ApplicationStarted.Register(() => OpenBrowser($"http://localhost:{port}", app.Logger));
+
 app.Run();
+
+static void OpenBrowser(string url, ILogger logger)
+{
+    try
+    {
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+    }
+    catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or PlatformNotSupportedException)
+    {
+        logger.LogInformation("Abra {Url} no navegador.", url);
+    }
+}
 
 static void Configure(JsonSerializerOptions options)
 {

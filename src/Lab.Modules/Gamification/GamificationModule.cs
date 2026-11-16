@@ -107,14 +107,23 @@ public sealed class EvaluationCompletedHandler(LabDbContext db, ILabNotifier not
         var firstOfChallenge = stats is null;
         stats ??= db.ChallengeStats.Add(new ChallengeStatsEntity
         {
-            ProfileId = e.ProfileId, ChallengeId = e.ChallengeId, SeedId = e.SeedId, Provider = e.Provider, FirstScore = e.FinalScore,
+            ProfileId = e.ProfileId,
+            ChallengeId = e.ChallengeId,
+            SeedId = e.SeedId,
+            Provider = e.Provider,
+            FirstScore = e.FinalScore,
         }).Entity;
 
         var credited = Math.Max(0, e.AttemptXp - stats.BestAttemptXp);
         db.XpEntries.Add(new XpEntryEntity
         {
-            Id = Guid.CreateVersion7(), ProfileId = e.ProfileId, Amount = credited, Reason = "evaluation", SourceType = "evaluation",
-            SourceId = source, CreatedAt = now,
+            Id = Guid.CreateVersion7(),
+            ProfileId = e.ProfileId,
+            Amount = credited,
+            Reason = "evaluation",
+            SourceType = "evaluation",
+            SourceId = source,
+            CreatedAt = now,
         });
 
         var previousLevel = progress.Level;

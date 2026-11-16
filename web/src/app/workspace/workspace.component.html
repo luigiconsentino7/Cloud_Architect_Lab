@@ -262,7 +262,7 @@
 
     <main class="canvas">
       @if (attempt(); as a) {
-        <lab-canvas [scene]="a.scene" [readOnly]="!editable()" (sceneChange)="onScene($event)" (selectionChange)="onSelection($event)" />
+        <lab-canvas [scene]="a.scene" [readOnly]="!editable()" (sceneChange)="onScene($event)" (sceneLoad)="elements.set($event)" (selectionChange)="onSelection($event)" />
       }
     </main>
 
