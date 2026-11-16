@@ -23,7 +23,12 @@ public sealed record SimulationRequest
     public long EventBudget { get; init; } = 20_000_000;
     public int MaxParallelism { get; init; } = Math.Max(1, Environment.ProcessorCount - 1);
     public bool IncludeSeries { get; init; } = true;
+
+    /// <summary>Avisado a cada cenário (e replicação) concluído — alimenta "Simulando payday-peak, 2 de 6".</summary>
+    public IProgress<SimulationProgress>? Progress { get; init; }
 }
+
+public sealed record SimulationProgress(int Completed, int Total, string ScenarioId);
 
 /// <summary>Simulador de eventos discretos. Mesma entrada + mesma semente = mesmo resultado.</summary>
 public static class Simulator
@@ -44,8 +49,13 @@ public static class Simulator
         var jobs = scenarios.SelectMany(s => Enumerable.Range(0, replications).Select(r => (Scenario: s, Replication: r))).ToList();
         var outputs = new ConcurrentDictionary<(string, int), ScenarioResult>();
 
+        var completed = 0;
         Parallel.ForEach(jobs, new ParallelOptions { MaxDegreeOfParallelism = request.MaxParallelism, CancellationToken = cancellationToken },
-            job => outputs[(job.Scenario.Id, job.Replication)] = RunOne(request, plans, job.Scenario, job.Replication, cancellationToken));
+            job =>
+            {
+                outputs[(job.Scenario.Id, job.Replication)] = RunOne(request, plans, job.Scenario, job.Replication, cancellationToken);
+                request.Progress?.Report(new SimulationProgress(Interlocked.Increment(ref completed), jobs.Count, job.Scenario.Id));
+            });
 
         var results = scenarios
             .Select(s => Aggregate(Enumerable.Range(0, replications).Select(r => outputs[(s.Id, r)]).ToList()))

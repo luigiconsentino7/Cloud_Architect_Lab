@@ -14,4 +14,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
   </ItemGroup>
+  <!-- O conteúdo versionado (catálogo, sementes, textos das regras) vai junto do executável. -->
+  <ItemGroup>
+    <None Include="../../content/**/*.yaml" LinkBase="content" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

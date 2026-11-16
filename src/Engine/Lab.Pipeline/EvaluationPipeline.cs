@@ -26,7 +26,8 @@ public enum PipelineStage
 
 public sealed record StageTiming(PipelineStage Stage, double Ms);
 
-public sealed record EvaluationProgress(PipelineStage Stage, string Message);
+/// <param name="Percent">0..100, estimado pelo peso de cada etapa (a simulação é ~65% do tempo).</param>
+public sealed record EvaluationProgress(PipelineStage Stage, string Message, double Percent = 0);
 
 /// <summary>Dados da tentativa para o XP (o histórico vem do backend).</summary>
 public sealed record XpContext
@@ -132,7 +133,7 @@ public static class EvaluationPipeline
         void Stage(PipelineStage stage, string message)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            request.Progress?.Report(new EvaluationProgress(stage, message));
+            request.Progress?.Report(new EvaluationProgress(stage, message, StartPercent(stage)));
         }
 
         void Done(PipelineStage stage)
@@ -175,6 +176,10 @@ public static class EvaluationPipeline
             EventBudget = request.EventBudget,
             IncludeSeries = request.IncludeSeries,
             MaxParallelism = request.MaxParallelism ?? Math.Max(1, Environment.ProcessorCount - 1),
+            Progress = request.Progress is null ? null : new InlineProgress<SimulationProgress>(p => request.Progress.Report(new EvaluationProgress(
+                PipelineStage.Simulation,
+                $"Simulando {ScenarioName(challenge, p.ScenarioId)}, {p.Completed} de {p.Total}",
+                StartPercent(PipelineStage.Simulation) + (65.0 * p.Completed / Math.Max(1, p.Total))))),
         }, cancellationToken);
         Done(PipelineStage.Simulation);
 
@@ -243,6 +248,26 @@ public static class EvaluationPipeline
             Timings = timings,
         };
         return result with { ResultHash = Canonical.Hash(result.WithoutWallClock()) };
+    }
+
+    private static double StartPercent(PipelineStage stage) => stage switch
+    {
+        PipelineStage.Compile => 2,
+        PipelineStage.Rules => 6,
+        PipelineStage.Functional => 10,
+        PipelineStage.Simulation => 15,
+        PipelineStage.Cost => 82,
+        PipelineStage.Score => 90,
+        _ => 95,
+    };
+
+    private static string ScenarioName(ChallengeSpec challenge, string scenarioId) =>
+        challenge.TestPlan.Find(scenarioId) is { Name.Length: > 0 } scenario ? scenario.Name : scenarioId;
+
+    /// <summary>IProgress síncrono: Progress&lt;T&gt; usa o SynchronizationContext e reordenaria os avisos.</summary>
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 
     public static EvaluationManifest ManifestFor(EvaluationRequest request, string irHash, SimulationReport? simulation = null)

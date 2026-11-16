@@ -32,7 +32,12 @@ public sealed record InstantiationRequest
     public string? ChallengeId { get; init; }
 }
 
-public sealed record Instantiation(ChallengeSpec Challenge, IReadOnlyList<Diagnostic> ReferenceDiagnostics);
+/// <param name="ReferenceScene">A referência como cena do canvas (para desenhá-la depois da submissão e nos testes ponta a ponta).</param>
+public sealed record Instantiation(
+    ChallengeSpec Challenge,
+    IReadOnlyList<Diagnostic> ReferenceDiagnostics,
+    JsonObject? ReferenceScene = null,
+    IReadOnlyList<FlowDefinition>? ReferenceFlows = null);
 
 /// <summary>
 /// Semente + variação + provedor → desafio. Aplica as pegadinhas, avalia os templates, converte unidades e compila a
@@ -145,7 +150,9 @@ public static partial class SeedInstantiator
         });
         return new Instantiation(
             challenge with { Reference = compilation.Graph, ReferenceRationale = Str(reference["rationale"]) ?? "" },
-            compilation.Diagnostics);
+            compilation.Diagnostics,
+            scene,
+            flows);
     }
 
     private static List<TwistSpec> ResolveTwists(Seed seed, InstantiationRequest request)

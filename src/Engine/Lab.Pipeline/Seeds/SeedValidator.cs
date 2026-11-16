@@ -106,7 +106,7 @@ public static class SeedValidator
             if (!options.RunReference || challenge.Reference is null || instance.ReferenceDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
                 continue;
 
-            var started = DateTime.UtcNow;
+            var started = System.Diagnostics.Stopwatch.StartNew();
             var result = EvaluationPipeline.Evaluate(new EvaluationRequest
             {
                 Challenge = challenge,
@@ -121,7 +121,7 @@ public static class SeedValidator
             var failed = result.Score.Checks.Where(c => !c.Passed).Select(c => $"{c.Id}: {c.Description}").ToList();
             results.Add(new VariationResult(variation.Name, challenge.Provider, challenge.Difficulty, challenge.Variables, challenge.Twists,
                 result.Score.FinalScore, result.Score.Rank, result.Cost.MonthlyUsd, challenge.Constraints.BudgetUsdMonth, failed,
-                (DateTime.UtcNow - started).TotalMilliseconds));
+                started.Elapsed.TotalMilliseconds));
 
             if (result.Score.FinalScore < options.MinimumReferenceScore)
             {

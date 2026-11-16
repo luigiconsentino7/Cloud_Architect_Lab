@@ -40,10 +40,11 @@ twists:
       - { op: set, path: constraints.budgetUsdMonth, value: "{{ round((5000 + baselineRps * 36) * 0.8) }}" }
   - id: auditoria-obrigatoria
     title: Auditoria obrigatória
-    description: O compliance exige trilha de auditoria imutável de cada transação.
+    description: O compliance exige trilha de auditoria imutável de cada transação — e liberou 30% a mais de orçamento para isso.
     minDifficulty: senior
     ops:
       - { op: set, path: constraints.requireAuditLog, value: true }
+      - { op: set, path: constraints.budgetUsdMonth, value: "{{ round((5000 + baselineRps * 36) * 1.3) }}" }
       - op: append
         path: reference.nodes
         value: { id: audit, archetype: data.object-storage, label: trilha-auditoria, config: { objectLock: true } }
