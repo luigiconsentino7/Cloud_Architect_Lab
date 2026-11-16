@@ -56,10 +56,11 @@ Abrir o `Lab.App.exe` sobe o servidor e abre o navegador.
 1. Instale o [Ollama](https://ollama.com/download) e baixe um modelo de 3–4B, que cabe inteiro numa GPU de 4 GB:
 
    ```bash
-   ollama pull qwen2.5:3b
+   ollama pull gemma3:4b
    ```
 
-2. Abra o app. No modo `auto` (padrão), ele detecta o Ollama e o modelo sozinho e o chat mostra "IA local · qwen2.5:3b".
+2. Abra o app. No modo `auto` (padrão), ele detecta o Ollama e o modelo sozinho e o chat mostra "IA local · gemma3:4b".
+   Prefere respostas mais rápidas, ainda que menos cuidadosas? Baixe o `qwen2.5:3b` e use `Ai__Ollama__Model=qwen2.5:3b`.
 
 | Papel | Sem IA | Com o Ollama |
 |---|---|---|
@@ -75,7 +76,7 @@ Configuração (`src/Lab.App/appsettings.json` ou variáveis de ambiente):
 | Chave | Padrão | Exemplo por variável de ambiente |
 |---|---|---|
 | `Ai:Mode` | `auto` (`none` desliga, `ollama` exige) | `Ai__Mode=none` |
-| `Ai:Ollama:Model` | `qwen2.5:3b` | `Ai__Ollama__Model=gemma3:4b` |
+| `Ai:Ollama:Model` | `gemma3:4b` | `Ai__Ollama__Model=qwen2.5:3b` |
 | `Ai:Ollama:Endpoint` | `http://127.0.0.1:11434` (IPv4: no Windows, `localhost` tenta o IPv6 primeiro e perde segundos) | `Ai__Ollama__Endpoint=http://127.0.0.1:11434` |
 | `Ai:Ollama:ContextTokens` / `TimeoutSeconds` | `8192` / `120` | `Ai__Ollama__TimeoutSeconds=60` |
 | `Ai:Ollama:ProbeTimeoutMs` | `4000` (quanto esperar o Ollama responder à checagem de disponibilidade) | `Ai__Ollama__ProbeTimeoutMs=8000` |
@@ -96,8 +97,13 @@ No Linux, macOS ou Git Bash:
 ./lab.sh ai eval --models qwen2.5:3b,gemma3:4b
 ```
 
-Referência (RTX 3050 de 4 GB, 16/11/2026): os dois modelos acima passam nos critérios; o `qwen2.5:3b` roda a ≈ 70
-tokens/s (respostas em menos de 1 s no chat) e o `gemma3:4b` é um pouco mais preciso e ≈ 4× mais lento (≈ 19 tokens/s). Detalhes em [docs/spec/11](docs/spec/11-estado-da-implementacao.md#spike-s4-primeira-rodada-real-16112026).
+Referência (RTX 3050 de 4 GB, 16/11/2026): os dois modelos passam nos critérios. O `gemma3:4b` (o padrão) erra menos e
+escreve em frases completas, a ≈ 19 tokens/s (≈ 2 s por resposta do entrevistador); o `qwen2.5:3b` é ≈ 4× mais rápido
+(≈ 71 tokens/s, respostas em menos de 1 s), mas já trocou um número do enunciado por outro, responde seco e às vezes
+corta o texto no meio. Detalhes em [docs/spec/11](docs/spec/11-estado-da-implementacao.md#spike-s4-segunda-rodada-real-16112026-1751).
+
+Para ver se uma janela de contexto menor deixa o `gemma3:4b` mais rápido (o cache de atenção também ocupa a VRAM), rode
+com `--context 4096` (o padrão do app é 8192) e compare os tokens por segundo.
 
 O comando carrega o modelo na memória antes de medir, mostra uma linha por caso e leva alguns minutos por modelo. O
 relatório (em `exports/evals/`) mostra, por modelo, deltas válidos e aderentes ao contexto, respostas certas e sem

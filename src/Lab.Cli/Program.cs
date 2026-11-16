@@ -16,7 +16,7 @@ const string Usage = """
       lab rules validate
       lab catalog validate
       lab evaluate <semente> [--reference | --scene cena.json] [--provider aws] [--difficulty senior] [--out exports/]
-      lab ai eval [--models qwen2.5:3b,gemma3:4b] [--endpoint http://127.0.0.1:11434] [--roles personalizador,entrevistador,narrador,mapeador] [--limit n] [--out exports/evals]
+      lab ai eval [--models qwen2.5:3b,gemma3:4b] [--endpoint http://127.0.0.1:11434] [--roles personalizador,entrevistador,narrador,mapeador] [--limit n] [--context 8192] [--out exports/evals]
 
     Opções gerais:
       --content <pasta>   pasta content/ (padrão: procurada a partir do diretório atual)

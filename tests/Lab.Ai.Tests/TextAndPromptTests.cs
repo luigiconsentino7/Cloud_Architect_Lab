@@ -35,7 +35,7 @@ public sealed class TextAndPromptTests
     {
         var prompts = TestAi.Prompts();
 
-        prompts.Get(PromptRoles.Personalizer).Id.ShouldBe("personalizador/v1");
+        prompts.Get(PromptRoles.Personalizer).Id.ShouldBe("personalizador/v2");
         prompts.Get(PromptRoles.Interviewer).Text.ShouldStartWith("Você é o entrevistador");
         prompts.Get(PromptRoles.Narrator).Text.ShouldNotContain("changelog");
     }

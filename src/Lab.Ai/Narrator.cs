@@ -47,7 +47,7 @@ public sealed class ReviewNarrator(AiRuntime runtime, PromptLibrary prompts, ILo
                 logger.LogInformation("Narrativa rejeitada (tentativa {Attempt}): {Problems}", attempt, string.Join("; ", problems));
                 messages.Add(new ChatMessage(ChatRole.Assistant, response.Text));
                 messages.Add(new ChatMessage(ChatRole.User,
-                    $"A narrativa não pode ser usada: {string.Join("; ", problems)}. Reescreva usando só números que aparecem na <revisao>, copiados como estão."));
+                    $"A narrativa não pode ser usada: {string.Join("; ", problems)}. Reescreva corrigindo isso: use só números que aparecem na <revisao>, copiados como estão, e termine todas as frases."));
             }
 
             return null;
@@ -76,10 +76,23 @@ public sealed class ReviewNarrator(AiRuntime runtime, PromptLibrary prompts, ILo
     public static IReadOnlyList<string> Check(IReadOnlyList<string> paragraphs, NarrationRequest request)
     {
         if (paragraphs.Count == 0) return ["a resposta veio vazia"];
+        var problems = new List<string>();
+
+        // Modelo pequeno às vezes fecha o JSON no meio da frase ("…como o"): isso não vai para a tela.
+        if (paragraphs.Any(p => !EndsSentence(p))) problems.Add("há parágrafo que termina no meio de uma frase");
+
         var allowed = AiText.Numbers(request.ReviewJson).Append(request.FinalScore).Concat(AiText.Numbers(request.Title));
         var unknown = AiText.UnknownNumbers(string.Join(' ', paragraphs), allowed);
-        return unknown.Count == 0
-            ? []
-            : [$"cita números que não estão na revisão ({string.Join(", ", unknown.Select(n => n.ToString("#,0.###", CultureInfo.GetCultureInfo("pt-BR"))))})"];
+        if (unknown.Count > 0)
+            problems.Add($"cita números que não estão na revisão ({string.Join(", ", unknown.Select(n => n.ToString("#,0.###", CultureInfo.GetCultureInfo("pt-BR"))))})");
+        return problems;
+    }
+
+    /// <summary>O parágrafo acaba em ponto final, exclamação ou interrogação (aspas, parênteses e negrito depois deles valem).</summary>
+    public static bool EndsSentence(string paragraph)
+    {
+        var text = paragraph.TrimEnd();
+        while (text.Length > 0 && text[^1] is '"' or '”' or '\'' or ')' or ']' or '*') text = text[..^1];
+        return text.Length > 0 && text[^1] is '.' or '!' or '?';
     }
 }

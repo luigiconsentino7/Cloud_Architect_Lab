@@ -42,9 +42,12 @@ public sealed class InterviewerAndNarratorTests
             d => { deltas.Add(d); return ValueTask.CompletedTask; }, TestContext.Current.CancellationToken);
 
         answer.Source.ShouldBe(AnswerSource.Ai);
-        answer.PromptVersion.ShouldBe("entrevistador/v2");
+        answer.PromptVersion.ShouldBe("entrevistador/v3");
         string.Concat(deltas).ShouldBe(answer.Text);
         deltas.Count.ShouldBeGreaterThan(1);
+        var options = client.Calls[0].Options!;
+        options.Temperature.ShouldBe(0.3f); // a 0,7 do qwen2.5:3b inventava números; baixa, ele copia do enunciado
+        options.MaxOutputTokens.ShouldBe(300);
         var messages = client.Calls[0].Messages;
         messages[0].Role.ShouldBe(ChatRole.System);
         messages[0].Text.ShouldContain("<desafio>");
@@ -59,6 +62,18 @@ public sealed class InterviewerAndNarratorTests
 
         text.ShouldContain("Os cenários ocultos existem");
         text.ShouldContain("nunca diga que não existem");
+    }
+
+    [Fact]
+    public void O_prompt_do_entrevistador_pede_frases_completas_sem_citar_mensagens_anteriores_nem_frase_pronta()
+    {
+        var text = TestAi.Prompts().Get(PromptRoles.Interviewer).Text;
+
+        text.ShouldContain("frases completas"); // o qwen2.5:3b respondia só "300 req/s"
+        text.ShouldContain("Nunca cite mensagens anteriores"); // o gemma3:4b abria a conversa com "como mencionado anteriormente"
+        text.ShouldContain("provedor de nuvem, região"); // dado do enunciado, não é "não definido"
+        text.ShouldContain("suas próprias palavras"); // a frase pronta do v2 era repetida fora de lugar
+        text.ShouldNotContain("Pode assumir, mas deixe a premissa explícita no desenho");
     }
 
     [Fact]
@@ -91,6 +106,53 @@ public sealed class InterviewerAndNarratorTests
         narrative.Paragraphs.Count.ShouldBe(2);
         client.Calls.Count.ShouldBe(2);
         client.Calls[1].Messages[^1].Text.ShouldContain("2.500");
+    }
+
+    [Fact]
+    public async Task Paragrafo_cortado_no_meio_da_frase_nao_vai_para_a_tela_e_ganha_nova_chance()
+    {
+        var replies = new Queue<string>([
+            TestAi.Json(new { paragraphs = new[] { "Nota 72: o p99 de 1.277 ms no pico pesou mais.", "O ponto fraco é a fila sem DLQ, como o" } }),
+            TestAi.Json(new { paragraphs = new[] { "Nota 72: o p99 de 1.277 ms no pico pesou mais.", "O ponto fraco é a fila sem DLQ, que perde mensagens." } }),
+        ]);
+        var client = new FakeChatClient((_, _) => replies.Dequeue());
+        var narrator = new ReviewNarrator(TestAi.Runtime(client), TestAi.Prompts(), TestAi.Log<ReviewNarrator>());
+        var request = new NarrationRequest("Envio de Pix", 72, "B", """{"melhorias":[{"evidencias":["p99 de 1.277 ms no cenário Pico"]}]}""");
+
+        var narrative = await narrator.NarrateAsync(request, TestContext.Current.CancellationToken);
+
+        narrative.ShouldNotBeNull().Paragraphs.Last().ShouldBe("O ponto fraco é a fila sem DLQ, que perde mensagens.");
+        client.Calls.Count.ShouldBe(2);
+        var correction = client.Calls[1].Messages[^1].Text;
+        correction.ShouldContain("termina no meio de uma frase");
+        correction.ShouldContain("termine todas as frases");
+    }
+
+    [Fact]
+    public async Task Paragrafo_cortado_que_se_repete_descarta_a_narrativa()
+    {
+        var client = new FakeChatClient((_, _) => TestAi.Json(new { paragraphs = new[] { "Nota 72: a fila perde mensagens porque o" } }));
+        var narrator = new ReviewNarrator(TestAi.Runtime(client), TestAi.Prompts(), TestAi.Log<ReviewNarrator>());
+
+        (await narrator.NarrateAsync(new NarrationRequest("Envio de Pix", 72, "B", "{}"), TestContext.Current.CancellationToken)).ShouldBeNull();
+        client.Calls.Count.ShouldBe(2);
+    }
+
+    [Theory]
+    [InlineData("Termina bem.", true)]
+    [InlineData("Termina com ênfase!", true)]
+    [InlineData("Termina com dúvida?", true)]
+    [InlineData("Termina com aspas \"fim.\"", true)]
+    [InlineData("Termina com **negrito.**", true)]
+    [InlineData("Termina com parênteses (como este.)", true)]
+    [InlineData("Termina com espaços sobrando.  ", true)]
+    [InlineData("O ponto fraco é a fila, como o", false)]
+    [InlineData("Nota 72:", false)]
+    [InlineData("Termina com vírgula,", false)]
+    [InlineData("", false)]
+    public void Reconhece_o_paragrafo_que_termina_a_frase(string paragraph, bool expected)
+    {
+        ReviewNarrator.EndsSentence(paragraph).ShouldBe(expected);
     }
 
     [Fact]

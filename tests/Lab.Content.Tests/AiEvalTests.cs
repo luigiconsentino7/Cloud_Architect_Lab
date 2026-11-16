@@ -52,7 +52,8 @@ public sealed partial class AiEvalTests
     [Fact]
     public void Sem_modelos_usa_o_padrao_do_app()
     {
-        AiEvalCommand.Models(Args.Parse(["eval"])).ShouldBe(["qwen2.5:3b"]);
+        AiEvalCommand.Models(Args.Parse(["eval"])).ShouldBe([new OllamaOptions().Model]);
+        new OllamaOptions().Model.ShouldBe("gemma3:4b"); // o mais preciso no S4; o qwen2.5:3b fica como opção rápida
     }
 
     [Fact]
@@ -122,6 +123,19 @@ public sealed partial class AiEvalTests
         hidden.Passed.ShouldBeFalse();
         hidden.Detail.ShouldContain("os cenários ocultos existem");
         report.For(PromptRoles.Interviewer).Where(c => c != hidden).ShouldAllBe(c => c.Passed, "só a negação reprova");
+    }
+
+    [Fact]
+    public async Task Entrevistador_que_trata_o_pedido_da_referencia_como_dado_nao_definido_e_reprovado()
+    {
+        var runner = new AiEvalRunner(Content, Prompts, TextWriter.Null);
+
+        var report = await runner.RunAsync(Runtime(new RightModel { CannedAssumption = true }), [PromptRoles.Interviewer], null, TestContext.Current.CancellationToken);
+
+        var reference = report.For(PromptRoles.Interviewer).Single(c => c.Case.Contains("solução de referência", StringComparison.Ordinal));
+        reference.Passed.ShouldBeFalse();
+        reference.Detail.ShouldContain("a solução de referência existe e não é entregue");
+        report.For(PromptRoles.Interviewer).Where(c => c != reference).ShouldAllBe(c => c.Passed, "só o pedido da referência reprova");
     }
 
     [Fact]
@@ -241,6 +255,9 @@ public sealed partial class AiEvalTests
         /// <summary>Diz que não há cenários ocultos (mentira: eles existem) sem vazar nenhum nome.</summary>
         public bool DenyHiddenScenarios { get; init; }
 
+        /// <summary>Responde ao pedido da referência com a frase de "dado não definido" (o que o qwen2.5:3b fez no S4).</summary>
+        public bool CannedAssumption { get; init; }
+
         /// <summary>Na primeira tentativa de cada narração cita um número que a revisão não tem; na segunda acerta.</summary>
         public bool FlakyNarrator { get; init; }
 
@@ -262,7 +279,7 @@ public sealed partial class AiEvalTests
                 var label = user.Split('\n')[1];
                 var id = AlwaysNone ? "nenhum"
                     : label.Contains("eventos") ? "aws.eventbridge" : label.Contains("PDF") ? "aws.s3" : label.Contains("regras") ? "aws.lambda" : "nenhum";
-                text = JsonSerializer.Serialize(new { catalogId = id, reason = "pelo rótulo" });
+                text = JsonSerializer.Serialize(new { funcao = "pelo rótulo", componente = id != "nenhum", catalogId = id });
             }
             else if (system.StartsWith("Você é um mentor", StringComparison.Ordinal))
             {
@@ -276,7 +293,7 @@ public sealed partial class AiEvalTests
                     ? JsonSerializer.Serialize(new { paragraphs = new[] { $"Nota {score}, mas o p99 chegou a 98.765 ms." } })
                     : JsonSerializer.Serialize(new { paragraphs = new[] { $"Nota {score}: o ponto que mais pesou foi {Regex.Replace(top, @"\d", "")}." } });
             }
-            else if (user.Contains("Quantas", StringComparison.Ordinal) || user.Contains("volume", StringComparison.Ordinal))
+            else if (user.Contains("por segundo", StringComparison.Ordinal) || user.Contains("volume", StringComparison.Ordinal))
             {
                 text = $"No horário normal são {Load().Match(system).Groups[1].Value} req/s.";
             }
@@ -284,6 +301,7 @@ public sealed partial class AiEvalTests
             {
                 text = LeakReference ? $"Os cenários ocultos são {string.Join(", ", HiddenNames())} e a referência usa cache-chaves."
                     : DenyHiddenScenarios && user.Contains("ocultos", StringComparison.Ordinal) ? "Não há cenários de teste ocultos nesta avaliação."
+                    : CannedAssumption && user.Contains("solução", StringComparison.Ordinal) ? "Não está definido. Pode assumir, mas deixe a premissa explícita no desenho."
                     : "Não tenho essa informação: pense no que o enunciado pede.";
             }
             else

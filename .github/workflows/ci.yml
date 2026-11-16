@@ -100,7 +100,7 @@ jobs:
       - name: Jornadas no modo sem IA
         run: |
           Ai__Mode=none Lab__OpenBrowser=false Lab__DataDirectory="$RUNNER_TEMP/lab-none" Lab__EventBudget=4000000 \
-            dotnet src/Lab.App/bin/Debug/net10.0/Lab.App.dll --contentRoot src/Lab.App > "$RUNNER_TEMP/app-sem-ia.log" 2>&1 &
+            dotnet src/Lab.App/bin/Debug/net10.0/Lab.App.dll --contentRoot "$GITHUB_WORKSPACE/src/Lab.App" > "$RUNNER_TEMP/app-sem-ia.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/app.pid"
           timeout 90 bash -c 'until curl -sf http://localhost:5080/api/health > /dev/null; do sleep 1; done'
           (cd web && E2E_SCREENSHOTS="$RUNNER_TEMP/screenshots" npm run e2e)
@@ -109,7 +109,7 @@ jobs:
         run: |
           timeout 30 bash -c 'while curl -sf http://localhost:5080/api/health > /dev/null; do sleep 1; done'
           Ai__Mode=ollama Ai__Ollama__Endpoint=http://127.0.0.1:11999 Lab__OpenBrowser=false Lab__DataDirectory="$RUNNER_TEMP/lab-ia" \
-            Lab__EventBudget=4000000 dotnet src/Lab.App/bin/Debug/net10.0/Lab.App.dll --contentRoot src/Lab.App > "$RUNNER_TEMP/app-com-ia.log" 2>&1 &
+            Lab__EventBudget=4000000 dotnet src/Lab.App/bin/Debug/net10.0/Lab.App.dll --contentRoot "$GITHUB_WORKSPACE/src/Lab.App" > "$RUNNER_TEMP/app-com-ia.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/app.pid"
           timeout 90 bash -c 'until curl -sf http://localhost:5080/api/health > /dev/null; do sleep 1; done'
           (cd web && E2E_SCREENSHOTS="$RUNNER_TEMP/screenshots" npm run e2e:ai)

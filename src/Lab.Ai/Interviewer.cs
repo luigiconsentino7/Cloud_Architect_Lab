@@ -80,7 +80,7 @@ public sealed class Interviewer(AiRuntime runtime, PromptLibrary prompts, ILogge
         try
         {
             using var deadline = runtime.Deadline(cancellationToken);
-            await foreach (var update in client.GetStreamingResponseAsync(Messages(prompt, request), runtime.ChatOptions(temperature: 0.5f, maxOutputTokens: 500), deadline.Token))
+            await foreach (var update in client.GetStreamingResponseAsync(Messages(prompt, request), runtime.ChatOptions(temperature: 0.3f, maxOutputTokens: 300), deadline.Token))
             {
                 var delta = update.Text;
                 if (string.IsNullOrEmpty(delta)) continue;

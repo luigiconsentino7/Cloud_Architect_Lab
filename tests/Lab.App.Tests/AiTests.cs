@@ -70,7 +70,7 @@ public sealed class AiTests
 
         var assistant = reply["assistant"]!;
         assistant["source"]!.GetValue<string>().ShouldBe("ia");
-        assistant["promptVersion"]!.GetValue<string>().ShouldBe("personalizador/v1");
+        assistant["promptVersion"]!.GetValue<string>().ShouldBe("personalizador/v2");
         var payload = assistant["payload"]!;
         payload["kind"]!.GetValue<string>().ShouldBe("challenge");
         payload["adjustments"]!.AsArray().ShouldContain(a => a!.GetValue<string>().Contains("pegadinha-que-nao-existe"));
@@ -134,7 +134,7 @@ public sealed class AiTests
     {
         var fake = new ScriptedModel
         {
-            Map = (options, label) => new { catalogId = label.Contains("antifraude") ? "aws.lambda" : "aws.servico-inventado", reason = "Regras rodam em funções." },
+            Map = (options, label) => new { funcao = "Regras rodam em funções.", componente = true, catalogId = label.Contains("antifraude") ? "aws.lambda" : "aws.servico-inventado" },
         };
         await using var factory = WithModel(fake);
         var api = factory.Api();

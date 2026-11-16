@@ -34,7 +34,7 @@ public sealed class PersonalizerTests
         result.Delta.Twists.ShouldBe(["conta-quente"]);
         result.Delta.ClarificationsExtra.Single().Question.ShouldBe("Existe limite noturno?");
         result.Adjustments.ShouldContain(a => a.Contains("nao-existe"));
-        result.PromptVersion.ShouldBe("personalizador/v1");
+        result.PromptVersion.ShouldBe("personalizador/v2");
         FakeChatClient.SchemaEnum(client.Calls[0].Options, "seedId").ShouldBe(["pix/envio-pix", "ledger/razao"]);
     }
 
@@ -143,7 +143,7 @@ public sealed class LabelMapperTests
     [InlineData("aws.inventado", null)]
     public async Task So_aceita_um_id_da_paleta(string answer, string? expected)
     {
-        var client = new FakeChatClient((_, _) => TestAi.Json(new { catalogId = answer, reason = "fila" }));
+        var client = new FakeChatClient((_, _) => TestAi.Json(new { funcao = "guarda mensagens", componente = answer != "nenhum", catalogId = answer }));
         var mapper = new LabelMapper(TestAi.Runtime(client), TestAi.Prompts(), TestAi.Log<LabelMapper>());
 
         var suggestion = await mapper.SuggestAsync(Request, TestContext.Current.CancellationToken);
@@ -157,25 +157,37 @@ public sealed class LabelMapperTests
     [Fact]
     public async Task Rotulo_que_o_modelo_diz_ser_anotacao_nao_ganha_sugestao_mesmo_com_id_valido()
     {
-        var client = new FakeChatClient((_, _) => TestAi.Json(new { componente = false, catalogId = "aws.sqs", reason = "é um lembrete" }));
+        var client = new FakeChatClient((_, _) => TestAi.Json(new { funcao = "lembrete", componente = false, catalogId = "aws.sqs" }));
         var mapper = new LabelMapper(TestAi.Runtime(client), TestAi.Prompts(), TestAi.Log<LabelMapper>());
 
         (await mapper.SuggestAsync(Request, TestContext.Current.CancellationToken)).ShouldBeNull();
     }
 
     [Fact]
-    public async Task O_modelo_decide_primeiro_se_e_componente_e_o_prompt_traz_exemplos()
+    public async Task O_modelo_descreve_a_funcao_decide_se_e_componente_e_so_entao_escolhe_o_id()
     {
-        var client = new FakeChatClient((_, _) => TestAi.Json(new { componente = true, catalogId = "aws.sqs", reason = "fila" }));
+        var client = new FakeChatClient((_, _) => TestAi.Json(new { funcao = "guarda mensagens para processar depois", componente = true, catalogId = "aws.sqs" }));
         var mapper = new LabelMapper(TestAi.Runtime(client), TestAi.Prompts(), TestAi.Log<LabelMapper>());
 
         var suggestion = await mapper.SuggestAsync(Request, TestContext.Current.CancellationToken);
 
         suggestion!.CatalogId.ShouldBe("aws.sqs");
-        suggestion.PromptVersion.ShouldBe("mapeador/v2");
+        suggestion.Reason.ShouldBe("guarda mensagens para processar depois"); // a função descrita vira o motivo mostrado ao usuário
+        suggestion.PromptVersion.ShouldBe("mapeador/v3");
         var schema = ((Microsoft.Extensions.AI.ChatResponseFormatJson)client.Calls[0].Options!.ResponseFormat!).Schema!.Value;
-        schema.GetProperty("properties").EnumerateObject().Select(p => p.Name).ShouldBe(["componente", "catalogId", "reason"]); // a decisão vem antes do id
-        client.Calls[0].Messages[0].Text.ShouldContain("componente: true só se");
+        schema.GetProperty("properties").EnumerateObject().Select(p => p.Name).ShouldBe(["funcao", "componente", "catalogId"]); // a ordem é a do raciocínio
+        schema.GetProperty("required").EnumerateArray().Select(p => p.GetString()).ShouldBe(["funcao", "componente", "catalogId"]);
+    }
+
+    [Fact]
+    public void O_prompt_do_mapeador_define_componente_pela_funcao_e_nome_de_time_como_anotacao()
+    {
+        var text = TestAi.Prompts().Get(PromptRoles.Mapper).Text;
+
+        text.ShouldContain("componente: true se a função for técnica"); // o qwen2.5:3b respondia "nenhum" para tudo
+        text.ShouldContain("não precisa citar tecnologia");
+        text.ShouldContain("nome de uma pessoa, equipe, time, squad, área"); // o gemma3:4b tipava nomes de time como serviço
+        text.ShouldContain("um time de dados não é um banco de dados");
     }
 
     [Fact]

@@ -9,8 +9,9 @@ namespace Lab.Ai;
 
 /// <summary>
 /// Sugere o componente do catálogo para uma forma desenhada à mão cujo rótulo não casou com nenhum alias. O modelo
-/// decide primeiro se o rótulo é um componente ou só uma anotação (nos evals reais, os dois modelos tipavam anotações
-/// como serviço quando "nenhum" era uma opção entre 30 ids); o schema só aceita ids da paleta do provedor ou "nenhum".
+/// descreve a função do rótulo, decide se é um componente ou só uma anotação e só então escolhe o id (nos evals reais,
+/// os modelos tipavam anotações como serviço ou recusavam tudo quando "nenhum" era uma opção entre 30 ids); o schema só
+/// aceita ids da paleta do provedor ou "nenhum".
 /// </summary>
 public sealed class LabelMapper(AiRuntime runtime, PromptLibrary prompts, ILogger<LabelMapper> logger) : ILabelMapper
 {
@@ -35,7 +36,8 @@ public sealed class LabelMapper(AiRuntime runtime, PromptLibrary prompts, ILogge
             if (json?["componente"] is JsonValue gate && gate.TryGetValue<bool>(out var isComponent) && !isComponent) return null;
             var catalogId = json?["catalogId"] is JsonValue v && v.TryGetValue<string>(out var id) ? id : null;
             if (catalogId is null || catalogId == None || request.Candidates.All(c => c.CatalogId != catalogId)) return null;
-            var reason = json?["reason"] is JsonValue r && r.TryGetValue<string>(out var text) ? AiText.Clean(text, 200) : "";
+            // A descrição da função que o modelo deu ao rótulo faz de motivo da sugestão.
+            var reason = json?["funcao"] is JsonValue r && r.TryGetValue<string>(out var text) ? AiText.Clean(text, 200) : "";
             return new LabelSuggestion(catalogId, reason, runtime.Options.Ollama.Model, prompt.Id);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
@@ -52,15 +54,15 @@ public sealed class LabelMapper(AiRuntime runtime, PromptLibrary prompts, ILogge
             ["type"] = "object",
             ["properties"] = new JsonObject
             {
+                ["funcao"] = new JsonObject { ["type"] = "string" },
                 ["componente"] = new JsonObject { ["type"] = "boolean" },
                 ["catalogId"] = new JsonObject
                 {
                     ["type"] = "string",
                     ["enum"] = new JsonArray(candidates.Select(c => (JsonNode)JsonValue.Create(c.CatalogId)).Append(JsonValue.Create(None)).ToArray()),
                 },
-                ["reason"] = new JsonObject { ["type"] = "string" },
             },
-            ["required"] = new JsonArray("componente", "catalogId", "reason"),
+            ["required"] = new JsonArray("funcao", "componente", "catalogId"),
         });
 
     /// <summary>O rótulo entra delimitado, como dado.</summary>

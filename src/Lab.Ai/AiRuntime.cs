@@ -20,8 +20,11 @@ public sealed class OllamaOptions
     /// <summary>127.0.0.1 e não "localhost": o Ollama escuta em IPv4 e, no Windows, "localhost" tenta o IPv6 primeiro (perde segundos).</summary>
     public string Endpoint { get; set; } = "http://127.0.0.1:11434";
 
-    /// <summary>Modelo de 3–4B que cabe inteiro em 4 GB de VRAM (spec 06); trocável a qualquer momento.</summary>
-    public string Model { get; set; } = "qwen2.5:3b";
+    /// <summary>
+    /// Modelo de 3–4B para uma GPU de 4 GB (spec 06). O padrão é o mais preciso no S4 (gemma3:4b: ≈ 19 tokens/s, 2 s por
+    /// resposta do entrevistador); o qwen2.5:3b é ≈ 4× mais rápido e menos confiável com números e na escrita.
+    /// </summary>
+    public string Model { get; set; } = "gemma3:4b";
 
     /// <summary>Janela de contexto: o cache de atenção também ocupa VRAM, então os prompts levam só o necessário.</summary>
     public int ContextTokens { get; set; } = 8192;

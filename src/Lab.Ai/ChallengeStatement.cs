@@ -59,7 +59,8 @@ public static class ChallengeStatement
             foreach (var ext in view.ExternalSystems)
             {
                 var limit = ext.RateLimitRps is { } rps ? $"; limite de {N(rps)} req/s" : "";
-                Line(text, $"- {ext.Name}: {ext.Description} Latência p50 {N(ext.Latency.P50)} ms e p99 {N(ext.Latency.P99)} ms; disponibilidade {N(ext.Availability * 100)}%{limit}.");
+                var about = string.IsNullOrWhiteSpace(ext.Description) ? "" : $"{ext.Description.Trim().TrimEnd('.')}. ";
+                Line(text, $"- {ext.Name}: {about}Latência p50 {N(ext.Latency.P50)} ms e p99 {N(ext.Latency.P99)} ms; disponibilidade {N(ext.Availability * 100)}%{limit}.");
             }
         }
 
@@ -80,7 +81,8 @@ public static class ChallengeStatement
         if (view.Scenarios.Count > 0)
         {
             text.AppendLine("Cenários de teste públicos:");
-            foreach (var scenario in view.Scenarios) Line(text, $"- {scenario.Name}: {scenario.Description}");
+            foreach (var scenario in view.Scenarios)
+                Line(text, string.IsNullOrWhiteSpace(scenario.Description) ? $"- {scenario.Name}" : $"- {scenario.Name}: {scenario.Description}");
         }
 
         if (view.HiddenScenarios > 0) Line(text, $"Outros {view.HiddenScenarios} cenários ficam ocultos até a submissão.");

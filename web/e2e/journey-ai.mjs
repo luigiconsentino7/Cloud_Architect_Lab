@@ -67,7 +67,7 @@ try {
   await page.waitForSelector('.map-actions button:has-text("(IA)")', { timeout: 30_000 });
   const mapper = ollama.requests.find((r) => r.messages[0].content.startsWith('Você ajuda a tipar'));
   assert.ok(mapper?.format?.properties?.catalogId?.enum?.includes('nenhum'), 'o mapeador manda a paleta e a opção "nenhum" no schema');
-  assert.equal(Object.keys(mapper.format.properties)[0], 'componente', 'o mapeador decide primeiro se a forma é um componente');
+  assert.deepEqual(Object.keys(mapper.format.properties), ['funcao', 'componente', 'catalogId'], 'o mapeador descreve a função, decide se é componente e só então escolhe o id');
   await page.click('.map-actions button:has-text("(IA)")');
   await waitFor(async () => (await api(`/api/challenges/${shapes.challengeId}/attempts`)).at(-1).scene.elements.find((e) => e.id === 'shape_0')?.customData?.kind, (k) => k === 'component', 15_000);
   const left = await waitFor(async () => page.locator('button.problem.info').count(), (n) => n === 0, 15_000);

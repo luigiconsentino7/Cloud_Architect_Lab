@@ -20,7 +20,7 @@ function personalize(format) {
 
 function mapLabel(format) {
   const ids = (format?.properties?.catalogId?.enum ?? []).filter((id) => id !== 'nenhum');
-  return { componente: true, catalogId: ids.find((id) => id.includes('lambda') || id.includes('functions')) ?? ids[0] ?? 'nenhum', reason: 'Regras de negócio rodam bem em funções.' };
+  return { funcao: 'Regras de negócio rodam bem em funções.', componente: true, catalogId: ids.find((id) => id.includes('lambda') || id.includes('functions')) ?? ids[0] ?? 'nenhum' };
 }
 
 function narrate(user) {
@@ -33,7 +33,7 @@ function narrate(user) {
   };
 }
 
-export function startFakeOllama({ port = 11999, model = 'qwen2.5:3b', chunkDelayMs = 25, slowTagsMs = Number(process.env.FAKE_OLLAMA_SLOW_TAGS_MS ?? 0) } = {}) {
+export function startFakeOllama({ port = 11999, model = 'gemma3:4b', chunkDelayMs = 25, slowTagsMs = Number(process.env.FAKE_OLLAMA_SLOW_TAGS_MS ?? 0) } = {}) {
   const requests = [];
   const server = createServer(async (req, res) => {
     if (process.env.FAKE_OLLAMA_LOG) console.log(`${req.method} ${req.url}`);
@@ -53,6 +53,7 @@ export function startFakeOllama({ port = 11999, model = 'qwen2.5:3b', chunkDelay
     for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw);
     requests.push(body);
+    if (process.env.FAKE_OLLAMA_DUMP) console.log(`--- ${body.messages.length} mensagens; sistema:\n${body.messages[0].content}\n--- usuário:\n${body.messages.at(-1).content}\n---`);
     const system = body.messages.find((m) => m.role === 'system')?.content ?? '';
     const firstUser = body.messages.find((m) => m.role === 'user')?.content ?? '';
     const content = system.startsWith('Você monta desafios')

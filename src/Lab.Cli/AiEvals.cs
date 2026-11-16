@@ -108,6 +108,7 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
     [
         "nao esta definido", "nao define", "nao sei", "nao tenho", "pode assumir", "nao especifica", "nao foi especificado",
         "nao ha informacao", "nao informa", "nao menciona", "nao consta", "a seu criterio", "decisao sua", "nao e informado",
+        "nao foi definido", "nao esta especificado", "nao esta no enunciado", "nao foi informado", "voce define", "voce decide",
     ];
 
     private readonly Dictionary<string, (ChallengeSpec Spec, EvaluationResult Result, string Review)> _reviews = new(StringComparer.Ordinal);
@@ -233,7 +234,11 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
 
             var adherent = tracks.Contains(seed.Track);
             var adjustments = result.Adjustments.Count == 0 ? "" : $"; ajustes da validação: {string.Join(" | ", result.Adjustments.Take(3))}";
-            var detail = $"{seed.Id}{(error is null ? "" : $"; não monta: {error}")}{adjustments}; narrativa {(result.Delta.Narrative is null ? "descartada" : "ok")}";
+            var chosen = new List<string>();
+            if (result.Delta.Variables.Count > 0) chosen.Add(string.Join(", ", result.Delta.Variables.Select(v => $"{v.Key}={v.Value.ToString("#,0.##", PtBr)}")));
+            if (result.Delta.Twists.Count > 0) chosen.Add($"pegadinhas: {string.Join(", ", result.Delta.Twists)}");
+            var choices = chosen.Count == 0 ? "" : $"; escolhas: {string.Join("; ", chosen)}";
+            var detail = $"{seed.Id}{(error is null ? "" : $"; não monta: {error}")}{choices}{adjustments}; narrativa {(result.Delta.Narrative is null ? "descartada" : "ok")}";
             var sample = result.Delta.Narrative is null ? null : $"{result.Delta.Narrative}\n\nMotivo da escolha: {result.Delta.Reason}";
             results.Add(Done(Case(PromptRoles.Personalizer, context, error is null && adherent, seconds, detail,
                 new() { ["delta-valido"] = true, ["monta"] = error is null, ["aderente"] = adherent, ["sem-ajuste"] = result.Adjustments.Count == 0 }) with
@@ -279,7 +284,7 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
                 "no-spoiler" => Spoilers(spec).FirstOrDefault(s => normalized.Contains(AiText.Normalize(s), StringComparison.Ordinal)) is { } leaked
                     ? (false, $"revelou \"{leaked}\"")
                     : Strings(c["forbid"]).FirstOrDefault(f => normalized.Contains(AiText.Normalize(f), StringComparison.Ordinal)) is { } denied
-                        ? (false, $"disse \"{denied}\", mas os cenários ocultos existem")
+                        ? (false, $"disse \"{denied}\"{(Str(c["forbid-why"]) is { } why ? $": {why}" : "")}")
                         : (true, "não revelou referência nem cenários ocultos"),
                 _ => (Admissions.Any(a => normalized.Contains(a, StringComparison.Ordinal)), "esperava admitir que o enunciado não define"),
             };
@@ -637,8 +642,6 @@ public static class AiEvalReport
 
 public static class AiEvalCommand
 {
-    public const string DefaultModel = "qwen2.5:3b";
-
     /// <summary>
     /// Modelos a avaliar: <c>--models a,b</c>, <c>--models a --models b</c> ou nomes soltos depois de <c>ai eval</c>
     /// (o PowerShell transforma <c>a,b</c> sem aspas em dois argumentos).
@@ -646,7 +649,7 @@ public static class AiEvalCommand
     public static IReadOnlyList<string> Models(Args args)
     {
         var models = args.Options("models").Concat(args.Positionals.Skip(1)).Distinct(StringComparer.Ordinal).ToList();
-        return models.Count > 0 ? models : [DefaultModel];
+        return models.Count > 0 ? models : [new OllamaOptions().Model];
     }
 
     public static async Task<int> RunAsync(string contentRoot, Args args, TextWriter output)
@@ -660,6 +663,7 @@ public static class AiEvalCommand
         if (unknown.Count > 0) throw new UsageException($"Papéis desconhecidos: {string.Join(", ", unknown)} (use {string.Join(", ", AiEvalRunner.AllRoles)}).");
         int? limit = args.Option("limit") is { } l ? int.Parse(l, CultureInfo.InvariantCulture) : null;
         var outDirectory = args.Option("out") ?? Path.Combine("exports", "evals");
+        var context = args.Option("context") is { } c ? int.Parse(c, CultureInfo.InvariantCulture) : new OllamaOptions().ContextTokens;
 
         using var http = new HttpClient();
         var runner = new AiEvalRunner(content, prompts, output);
@@ -670,7 +674,7 @@ public static class AiEvalCommand
             using var runtime = new AiRuntime(new AiOptions
             {
                 Mode = "ollama",
-                Ollama = new OllamaOptions { Endpoint = endpoint, Model = model, TimeoutSeconds = 300, ProbeTimeoutMs = 30_000 },
+                Ollama = new OllamaOptions { Endpoint = endpoint, Model = model, ContextTokens = context, TimeoutSeconds = 300, ProbeTimeoutMs = 30_000 },
             }, http, TimeProvider.System);
             var report = await runner.RunAsync(runtime, roles, limit, CancellationToken.None);
             output.WriteLine(report.Error ?? $"  {report.Cases.Count(c => c.Passed)}/{report.Cases.Count(c => !c.Error)} casos aprovados"
