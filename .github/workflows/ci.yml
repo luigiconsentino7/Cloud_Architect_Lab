@@ -134,7 +134,8 @@ jobs:
 
   publish:
     name: Executável — ${{ matrix.rid }}
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Push na main ou disparo manual (Actions → CI → Run workflow), que gera a versão de teste de qualquer branch.
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     needs: [e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -168,7 +169,7 @@ jobs:
 
   release:
     name: Versão de teste (Releases)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     needs: [publish]
     runs-on: ubuntu-latest
     timeout-minutes: 10
