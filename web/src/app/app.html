@@ -1,5 +1,8 @@
 <header class="top">
   <a routerLink="/" class="brand">☁️ Cloud Architect Lab</a>
+  @if (version(); as v) {
+    <span class="version" title="Versão do app (cite-a ao relatar um problema)">v{{ v }}</span>
+  }
   <nav>
     <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Desafios</a>
     <a routerLink="/perfil" routerLinkActive="active">Perfil</a>

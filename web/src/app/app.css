@@ -1,5 +1,6 @@
 .top { height: var(--header-height); display: flex; align-items: center; gap: 22px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--surface); position: sticky; top: 0; z-index: 10; }
 .brand { font-weight: 800; text-decoration: none; color: var(--text); }
+.version { margin-left: -14px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 nav { display: flex; gap: 14px; }
 nav a { text-decoration: none; color: var(--muted); font-size: 14px; }
 nav a.active { color: var(--text); font-weight: 600; }

@@ -159,8 +159,50 @@ jobs:
       - name: Publicar arquivo único (com o runtime, sem precisar do .NET instalado)
         run: >-
           dotnet publish src/Lab.App/Lab.App.csproj -c Release -r ${{ matrix.rid }} --self-contained
-          -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false -o publish/${{ matrix.rid }}
+          -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false
+          -p:VersionSuffix=teste.${{ github.run_number }} -o publish/${{ matrix.rid }}
       - uses: actions/upload-artifact@v4
         with:
           name: cloud-architect-lab-${{ matrix.rid }}
           path: publish/${{ matrix.rid }}
+
+  release:
+    name: Versão de teste (Releases)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cloud-architect-lab-*
+          path: dist
+      - name: Um zip por sistema
+        working-directory: dist
+        run: |
+          chmod +x cloud-architect-lab-linux-x64/Lab.App cloud-architect-lab-osx-arm64/Lab.App
+          for dir in cloud-architect-lab-*/; do
+            name="${dir%/}"
+            (cd "$name" && zip -qr "../$name.zip" .)
+          done
+          ls -la *.zip
+      - name: Pré-release com os executáveis
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v0.1.0-teste.${{ github.run_number }}"
+          guide="https://github.com/${{ github.repository }}/blob/${{ github.sha }}/docs/como-testar.md"
+          {
+            echo "Versão de teste do Cloud Architect Lab, gerada do commit ${{ github.sha }}."
+            echo
+            echo "- **Windows:** baixe \`cloud-architect-lab-win-x64.zip\`, extraia e abra \`Lab.App.exe\` (o Windows pode avisar que o app não é assinado: \"Mais informações\" → \"Executar assim mesmo\")."
+            echo "- **Linux:** \`cloud-architect-lab-linux-x64.zip\`, rode \`./Lab.App\`."
+            echo "- **macOS (Apple Silicon):** \`cloud-architect-lab-osx-arm64.zip\`, rode \`./Lab.App\` (o executável não é assinado)."
+            echo
+            echo "Não precisa instalar o .NET. A IA local é opcional (Ollama com \`gemma3:4b\`)."
+            echo "Como abrir, o que testar e como relatar problemas: [docs/como-testar.md]($guide)."
+          } > notas.md
+          gh release create "$tag" dist/*.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" \
+            --prerelease --title "Cloud Architect Lab ${tag#v}" --notes-file notas.md

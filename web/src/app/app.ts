@@ -17,9 +17,11 @@ export class App {
   protected readonly realtime = inject(RealtimeService);
   protected readonly fmt = fmt;
   protected readonly progress = signal<ProgressSummary | null>(null);
+  protected readonly version = signal<string | null>(null);
 
   constructor() {
     void this.realtime.start();
+    void this.api.health().then((h) => this.version.set(h.version)).catch(() => undefined);
     effect(() => {
       this.realtime.xpVersion();
       void this.api.me().then((me) => this.progress.set(me.progress)).catch(() => undefined);

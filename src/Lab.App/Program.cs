@@ -9,6 +9,16 @@ using OpenTelemetry.Trace;
 // Executável publicado: o wwwroot e o content/ ficam ao lado dele, não no diretório de onde ele foi aberto.
 var published = !args.Any(a => a.StartsWith("--contentRoot", StringComparison.OrdinalIgnoreCase))
     && File.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot", "index.html"));
+// No executável, um erro na abertura não pode fechar a janela antes de a mensagem ser lida.
+if (published)
+{
+    AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+    {
+        Console.Error.WriteLine($"\nO Cloud Architect Lab não conseguiu abrir: {(e.ExceptionObject as Exception)?.Message}");
+        Desktop.WaitForEnter();
+    };
+}
+
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
@@ -87,22 +97,30 @@ if (File.Exists(Path.Combine(app.Environment.WebRootPath ?? Path.Combine(AppCont
     app.MapFallbackToFile("index.html");
 
 // No desktop, o executável abre o app no navegador padrão (desligado em desenvolvimento, testes e CI).
-if (builder.Configuration.GetValue("Lab:OpenBrowser", false))
-    app.Lifetime.ApplicationStarted.Register(() => OpenBrowser($"http://localhost:{port}", app.Logger));
-
-app.Run();
-
-static void OpenBrowser(string url, ILogger logger)
+var openBrowser = builder.Configuration.GetValue("Lab:OpenBrowser", false);
+var url = $"http://localhost:{port}";
+app.Lifetime.ApplicationStarted.Register(() =>
 {
-    try
-    {
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
-    }
-    catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or PlatformNotSupportedException)
-    {
-        logger.LogInformation("Abra {Url} no navegador.", url);
-    }
+    app.Logger.LogInformation("Cloud Architect Lab {Version} aberto em {Url}. Deixe esta janela aberta enquanto usa o app; para encerrar, feche-a.",
+        AppVersion.Display, url);
+    if (openBrowser) Desktop.OpenBrowser(url, app.Logger);
+});
+
+// A porta já está ocupada: quase sempre é o próprio Lab, aberto antes (dois cliques no executável).
+if (published && !Desktop.PortIsFree(port)) return await Desktop.PortInUseAsync(port, openBrowser, waitForEnter: true, app.Logger);
+
+try
+{
+    await app.StartAsync();
 }
+catch (IOException ex) when (ex.InnerException is Microsoft.AspNetCore.Connections.AddressInUseException)
+{
+    // Ocupada entre a checagem e a subida, ou fora do executável (dotnet run duas vezes).
+    return await Desktop.PortInUseAsync(port, openBrowser, waitForEnter: published, app.Logger);
+}
+
+await app.WaitForShutdownAsync();
+return 0;
 
 static void Configure(JsonSerializerOptions options)
 {

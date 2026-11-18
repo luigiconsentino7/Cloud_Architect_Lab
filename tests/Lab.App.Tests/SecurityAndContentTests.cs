@@ -14,6 +14,26 @@ public sealed class SecurityAndContentTests : IAsyncLifetime
     public ValueTask DisposeAsync() => _factory.DisposeAsync();
 
     [Fact]
+    public async Task Health_traz_a_versao_do_app_para_relatos_de_problema()
+    {
+        var health = System.Text.Json.Nodes.JsonNode.Parse(await _factory.CreateClient().GetStringAsync("/api/health", TestContext.Current.CancellationToken))!;
+
+        health["version"]!.GetValue<string>().ShouldStartWith("0.1.0");
+        health["catalogVersion"].ShouldNotBeNull(); // é por ele que uma segunda janela reconhece o Lab já aberto
+    }
+
+    [Theory]
+    [InlineData("0.1.0-teste.12+5f9aeef1234567890abcdef", "0.1.0-teste.12 (5f9aeef)")]
+    [InlineData("0.1.0+abc", "0.1.0 (abc)")]
+    [InlineData("0.1.0+", "0.1.0")]
+    [InlineData("0.1.0", "0.1.0")]
+    [InlineData(null, "dev")]
+    public void Versao_mostra_o_numero_e_o_commit_curto(string? informationalVersion, string expected)
+    {
+        Lab.Modules.Shared.AppVersion.Format(informationalVersion).ShouldBe(expected);
+    }
+
+    [Fact]
     public async Task Respostas_levam_csp_e_cabecalhos_de_seguranca()
     {
         var response = await _factory.CreateClient().GetAsync("/api/health");

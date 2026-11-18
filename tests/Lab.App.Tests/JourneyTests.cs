@@ -33,6 +33,26 @@ public sealed class JourneyTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Nova_tentativa_comeca_com_o_desenho_e_os_fluxos_da_anterior_mas_sem_as_dicas()
+    {
+        var api = _factory.Api();
+        var (challengeId, attemptId, _) = await Start(api, "pix/envio-pix", "pleno", 300);
+        await Draw(api, attemptId, "pix/envio-pix", Difficulty.Pleno, 300);
+        (await api.PostAsync($"/api/attempts/{attemptId}/hints", null)).EnsureSuccessStatusCode();
+        var first = await (await api.GetAsync($"/api/attempts/{attemptId}")).ReadObject();
+
+        var second = await api.PostJson($"/api/challenges/{challengeId}/attempts", new { });
+
+        second["number"]!.GetValue<int>().ShouldBe(2);
+        second["status"]!.GetValue<string>().ShouldBe("draft");
+        second["scene"]!["elements"]!.AsArray().Count.ShouldBeGreaterThan(0);
+        second["scene"]!.ToJsonString().ShouldBe(first["scene"]!.ToJsonString()); // corrige em vez de redesenhar (spec 01)
+        second["flows"]!.ToJsonString().ShouldBe(first["flows"]!.ToJsonString());
+        first["hintLevelsUsed"]!.AsArray().Count.ShouldBe(1);
+        second["hintLevelsUsed"]!.AsArray().ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Submission_is_evaluated_scored_and_rewarded()
     {
         var api = _factory.Api();

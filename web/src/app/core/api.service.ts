@@ -167,6 +167,11 @@ export class ApiService {
     return this.get<AiStatus>('/api/ai/status');
   }
 
+  /** Versão do app ("0.1.0-teste.12 (5f9aeef)"), mostrada no topo para relatos de problema. */
+  health(): Promise<{ status: string; version: string }> {
+    return this.get('/api/health');
+  }
+
   conversations(kind: ConversationKind): Promise<ConversationSummary[]> {
     return this.get<ConversationSummary[]>(`/api/conversations?kind=${kind}&limit=1`);
   }

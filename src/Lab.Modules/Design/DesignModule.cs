@@ -75,20 +75,28 @@ public sealed class AttemptService(LabDbContext db, IChallengeQueries challenges
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>Abre uma tentativa. A partir da segunda, ela começa com o desenho e os fluxos da última (spec 01: "Nova
+    /// tentativa" mantém o desenho), para o usuário corrigir em vez de redesenhar; as dicas usadas não passam adiante.</summary>
     public async Task<AttemptEntity?> StartAsync(Guid challengeId, CancellationToken cancellationToken)
     {
         var challenge = await challenges.FindAsync(challengeId, cancellationToken);
         if (challenge is null) return null;
-        var number = await db.Attempts.CountAsync(a => a.ChallengeId == challengeId, cancellationToken) + 1;
+        var previous = await db.Attempts.Where(a => a.ChallengeId == challengeId).OrderByDescending(a => a.Number).FirstOrDefaultAsync(cancellationToken);
         var attempt = new AttemptEntity
         {
             Id = Guid.CreateVersion7(),
             ChallengeId = challengeId,
-            Number = number,
+            Number = (previous?.Number ?? 0) + 1,
             Provider = challenge.Provider,
             Mode = challenge.Mode,
             StartedAt = clock.GetUtcNow().UtcDateTime,
         };
+        if (previous is not null)
+        {
+            attempt.DraftSceneJson = previous.DraftSceneJson;
+            attempt.FlowsJson = previous.FlowsJson;
+        }
+
         db.Attempts.Add(attempt);
         await db.SaveChangesAsync(cancellationToken);
         return attempt;

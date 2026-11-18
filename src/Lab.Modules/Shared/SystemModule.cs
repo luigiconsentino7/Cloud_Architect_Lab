@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json.Nodes;
 using Lab.Ir;
 using Lab.Ir.Catalog;
@@ -76,7 +77,30 @@ public static class SystemEndpoints
             }
         }).WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(512L * 1024 * 1024)).WithTags("Sistema");
 
-        app.MapGet("/api/health", (LabContent content) => Results.Ok(new { status = "ok", catalogVersion = content.Catalog.Version, contentHash = content.ContentHash, seeds = content.Seeds.Count }))
-            .WithTags("Sistema");
+        app.MapGet("/api/health", (LabContent content) => Results.Ok(new
+        {
+            status = "ok",
+            version = AppVersion.Display,
+            catalogVersion = content.Catalog.Version,
+            contentHash = content.ContentHash,
+            seeds = content.Seeds.Count,
+        })).WithTags("Sistema");
+    }
+}
+
+/// <summary>Versão do app para a tela e para relatos de problema, como "0.1.0-teste.12 (5f9aeef)".</summary>
+public static class AppVersion
+{
+    public static string Display { get; } =
+        Format(typeof(AppVersion).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
+
+    /// <summary>"0.1.0-teste.12+5f9aeef…" vira "0.1.0-teste.12 (5f9aeef)": a versão e o commit curto.</summary>
+    public static string Format(string? informationalVersion)
+    {
+        if (string.IsNullOrWhiteSpace(informationalVersion)) return "dev";
+        var plus = informationalVersion.IndexOf('+', StringComparison.Ordinal);
+        if (plus < 0) return informationalVersion;
+        var commit = informationalVersion[(plus + 1)..];
+        return commit.Length == 0 ? informationalVersion[..plus] : $"{informationalVersion[..plus]} ({commit[..Math.Min(7, commit.Length)]})";
     }
 }

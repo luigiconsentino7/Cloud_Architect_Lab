@@ -81,6 +81,12 @@ Todos os 21 itens do backlog do MVP ([10](10-roadmap-e-riscos.md#backlog-do-mvp-
   viraram testes de determinismo, teoria e cenários escritos à mão.
 - **Observabilidade:** tracing OpenTelemetry só quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definido; as métricas da
   spec ainda não existem.
+- **Executável no desktop:** mostra a versão no topo da tela e no `/api/health` (`0.1.0-teste.N (commit)`); abrir o
+  executável com o app já aberto só abre o navegador nele; porta ocupada por outro programa e erro na abertura
+  mostram a mensagem e seguram a janela até um Enter. Cada push na `main` gera uma pré-release no GitHub com os
+  executáveis de Windows, Linux e macOS ([como testar](../como-testar.md)).
+- **Nova tentativa:** começa com o desenho e os fluxos da última tentativa (as dicas usadas não passam adiante), como
+  a [01](01-visao-e-produto.md) pede; antes começava vazia e com o canvas travado no modo de visualização.
 - **Catálogo:** os valores são ilustrativos, com link oficial e data de revisão por serviço; a calibração fina é
   trabalho contínuo com a skill `calibrar-catalogo`.
 

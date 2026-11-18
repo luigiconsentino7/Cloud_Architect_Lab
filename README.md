@@ -23,6 +23,12 @@ conquistas.
 - **Custo zero e privado.** Um processo .NET e um arquivo SQLite na sua máquina; nada sai dela (nem as fontes do
   canvas vêm de CDN, e uma CSP restritiva garante isso). Backup completo para exportar e importar no perfil.
 
+## Testar a versão de teste
+
+Não precisa compilar nada: baixe o zip do seu sistema na versão de teste mais nova em **Releases**, extraia e abra o
+`Lab.App.exe` (Windows) ou o `Lab.App` (Linux e macOS). O passo a passo, o roteiro do que testar e como relatar
+problemas estão em [docs/como-testar.md](docs/como-testar.md).
+
 ## Rodar
 
 **Requisitos:** [.NET SDK 10](https://dotnet.microsoft.com/download) (10.0.404 ou mais novo) e

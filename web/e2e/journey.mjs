@@ -25,7 +25,7 @@ const xpBefore = (await api('/api/me/progress')).summary.totalXp;
 
 try {
   // Jornada 1: validar e submeter → nota, XP e conquista.
-  await openWithReference(page, 'Consulta de chave PIX', 'junior');
+  const first = await openWithReference(page, 'Consulta de chave PIX', 'junior');
   await page.click('button:has-text("Validar")');
   await page.waitForSelector('.problems');
   assert.equal(await page.locator('.problem.error').count(), 0, 'o desenho de referência não pode ter erro de compilação');
@@ -40,6 +40,18 @@ try {
   assert.ok(progress.totalXp > xpBefore, 'a submissão credita XP');
   const achievements = await api('/api/me/achievements');
   assert.ok(achievements.find((a) => a.code === 'primeiro-deploy')?.unlocked, 'conquista Primeiro Deploy');
+
+  // Jornada 1b: "Nova tentativa" mantém o desenho e os fluxos da submetida e volta a ser editável (spec 01).
+  await page.click('a:has-text("Voltar ao desenho")');
+  await page.waitForSelector('.excalidraw');
+  const submitted = (await api(`/api/challenges/${first.challengeId}/attempts`)).at(-1);
+  assert.notEqual(submitted.status, 'draft', 'a tentativa submetida fica congelada');
+  await page.click('button:has-text("Nova tentativa")');
+  const fresh = await waitFor(async () => (await api(`/api/challenges/${first.challengeId}/attempts`)).at(-1), (a) => a.id !== submitted.id);
+  assert.equal(fresh.scene.elements.length, submitted.scene.elements.length, 'a nova tentativa começa com o desenho da submetida');
+  assert.equal(fresh.flows.length, submitted.flows.length, 'e com os fluxos da submetida');
+  await page.waitForSelector('.excalidraw .App-toolbar', { timeout: 15_000 }); // fora do modo de visualização: dá para editar
+  await page.waitForSelector('button:has-text("Submeter")');
 
   // Jornada 2: simulação de rascunho (Treino) roda só os cenários públicos e não rende XP.
   const xpAfterSubmission = progress.totalXp;

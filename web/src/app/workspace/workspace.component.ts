@@ -282,10 +282,13 @@ export class WorkspaceComponent implements OnDestroy {
     const challenge = this.challenge();
     if (!challenge) return;
     await this.run('Abrindo nova tentativa…', async () => {
-      this.attempt.set(await this.api.startAttempt(challenge.id));
-      this.flows.set([]);
+      // A nova tentativa começa com o desenho e os fluxos da anterior; o canvas é recriado para ela (editável).
+      const attempt = await this.api.startAttempt(challenge.id);
+      this.attempt.set(attempt);
+      this.flows.set(attempt.flows);
       this.validation.set(null);
       this.hints.set([]);
+      if (attempt.scene.elements.length > 0) this.scheduleLiveValidation(300);
     });
   }
 

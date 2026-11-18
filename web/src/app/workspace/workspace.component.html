@@ -251,7 +251,7 @@
                 @if (annotations().length > 0) {
                   <h4>Anotações</h4>
                   <p class="hint-text">
-                    Formas com texto que não viraram componente. Se alguma for um serviço, arraste o certo da paleta{{ aiOn() ? ' ou peça uma sugestão à IA local' : '' }}.
+                    Formas com texto que não viraram componente. Se alguma for um serviço, ponha o componente certo pela paleta{{ aiOn() ? ' ou peça uma sugestão à IA local' : '' }}.
                   </p>
                   @for (a of annotations(); track a.id) {
                     <button type="button" class="problem info" (click)="highlight([], [a.id])">“{{ a.text }}”</button>
@@ -307,7 +307,10 @@
 
     <main class="canvas">
       @if (attempt(); as a) {
-        <lab-canvas [scene]="a.scene" [readOnly]="!editable()" (sceneChange)="onScene($event)" (sceneLoad)="elements.set($event)" (selectionChange)="onSelection($event)" />
+        <!-- Um canvas por tentativa: o Excalidraw lê a cena e o modo de visualização só ao montar. -->
+        @for (current of [a]; track current.id) {
+          <lab-canvas [scene]="current.scene" [readOnly]="!editable()" (sceneChange)="onScene($event)" (sceneLoad)="elements.set($event)" (selectionChange)="onSelection($event)" />
+        }
       }
     </main>
 
