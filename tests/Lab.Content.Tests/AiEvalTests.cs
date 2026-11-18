@@ -197,6 +197,21 @@ public sealed partial class AiEvalTests
     }
 
     [Fact]
+    public void Relatorio_diz_com_que_prompts_e_datasets_foi_gerado()
+    {
+        var runner = new AiEvalRunner(Content, Prompts, TextWriter.Null);
+
+        var limited = runner.Fingerprint([PromptRoles.Interviewer, PromptRoles.Mapper], 3);
+        var everything = runner.Fingerprint([PromptRoles.Interviewer], null);
+
+        limited.ShouldMatch(@"^entrevistador/v\d+ \(3 casos\) · mapeador/v\d+ \(3 casos\)$"); // --limit conta só o que roda
+        everything.ShouldMatch(@"^entrevistador/v\d+ \(\d+ casos\)$");
+        var markdown = AiEvalReport.Markdown([Synthetic("modelo", 1.0, 1, 50)], "x", DateTime.Now, limited);
+        markdown.ShouldContain($"Prompts e casos desta rodada: {limited}"); // rodada com cópia desatualizada do repositório se entrega aqui
+        AiEvalReport.Markdown([Synthetic("modelo", 1.0, 1, 50)], "x", DateTime.Now).ShouldNotContain("Prompts e casos");
+    }
+
+    [Fact]
     public async Task Narrador_comenta_a_revisao_da_referencia_degradada()
     {
         var runner = new AiEvalRunner(Content, Prompts, TextWriter.Null) { NarrationEventBudget = 1_000_000 };

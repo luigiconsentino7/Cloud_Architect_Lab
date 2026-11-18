@@ -105,8 +105,10 @@ corta o texto no meio. Detalhes em [docs/spec/11](docs/spec/11-estado-da-impleme
 Para ver se uma janela de contexto menor deixa o `gemma3:4b` mais rápido (o cache de atenção também ocupa a VRAM), rode
 com `--context 4096` (o padrão do app é 8192) e compare os tokens por segundo.
 
-O comando carrega o modelo na memória antes de medir, mostra uma linha por caso e leva alguns minutos por modelo. O
-relatório (em `exports/evals/`) mostra, por modelo, deltas válidos e aderentes ao contexto, respostas certas e sem
+O comando carrega o modelo na memória antes de medir, mostra uma linha por caso e leva alguns minutos por modelo. Ele
+começa dizendo com que prompts e quantos casos roda (`Prompts e casos desta rodada: entrevistador/v3 (10 casos) · …`) e
+o relatório repete essa linha: antes de comparar rodadas, confira que as versões batem com o repositório atualizado
+(`git pull`). O relatório (em `exports/evals/`) mostra, por modelo, deltas válidos e aderentes ao contexto, respostas certas e sem
 vazamento do entrevistador, narrativas aceitas, mapeamentos certos, tempo mediano por caso, tempo até o primeiro token
 e tokens por segundo, e as amostras do que a IA escreveu (para você julgar a escrita em português, que números não
 mostram). Entre os modelos que passam no S4 (personalizador ≥ 80% de primeira, primeiro token ≤ 3 s, ≥ 15 tokens/s),

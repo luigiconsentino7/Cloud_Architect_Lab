@@ -445,6 +445,18 @@ public sealed class AiEvalRunner(ContentBundle content, PromptLibrary prompts, T
             Difficulty = SeedLoader.ParseDifficulty(difficulty ?? "senior"),
         }, content.Catalog).Challenge;
 
+    /// <summary>
+    /// Com que prompts e datasets esta rodada roda ("entrevistador/v3 (10 casos) · mapeador/v3 (12 casos)"). Vai no começo
+    /// da saída e no relatório: quem lê sabe de relance se a rodada usou o código novo ou uma cópia desatualizada.
+    /// </summary>
+    public string Fingerprint(IReadOnlyList<string> roles, int? limit) =>
+        string.Join(" · ", roles.Select(role =>
+        {
+            var total = (Dataset(role)["cases"] as JsonArray)?.Count ?? 0;
+            var prompt = prompts.Has(role) ? prompts.Get(role).Id : $"{role} (sem prompt)";
+            return $"{prompt} ({(limit is { } n ? Math.Min(n, total) : total)} casos)";
+        }));
+
     private JsonObject Dataset(string role)
     {
         var path = Path.Combine(content.Root, "evals", $"{role}.yaml");
@@ -477,12 +489,18 @@ public static class AiEvalReport
         (PromptRoles.Personalizer, "Personalizador"), (PromptRoles.Interviewer, "Entrevistador"), (PromptRoles.Narrator, "Narrador"), (PromptRoles.Mapper, "Mapeador"),
     ];
 
-    public static string Markdown(IReadOnlyList<ModelEvalReport> reports, string endpoint, DateTime when)
+    public static string Markdown(IReadOnlyList<ModelEvalReport> reports, string endpoint, DateTime when, string? fingerprint = null)
     {
         var text = new StringBuilder();
         text.AppendLine("# Avaliação dos modelos locais (spike S4)");
         text.AppendLine();
         text.AppendLine(CultureInfo.InvariantCulture, $"{when.ToString("dd/MM/yyyy HH:mm", PtBr)} · Ollama em {endpoint}");
+        if (!string.IsNullOrWhiteSpace(fingerprint))
+        {
+            text.AppendLine();
+            text.AppendLine(CultureInfo.InvariantCulture, $"Prompts e casos desta rodada: {fingerprint}");
+        }
+
         text.AppendLine();
         text.AppendLine("| Modelo | Personalizador | Entrevistador | Narrador | Mapeador | 1º token | Tokens/s | S4 |");
         text.AppendLine("|---|---|---|---|---|---|---|---|");
@@ -667,6 +685,8 @@ public static class AiEvalCommand
 
         using var http = new HttpClient();
         var runner = new AiEvalRunner(content, prompts, output);
+        var fingerprint = runner.Fingerprint(roles, limit);
+        output.WriteLine($"Prompts e casos desta rodada: {fingerprint}");
         var reports = new List<ModelEvalReport>();
         foreach (var model in models)
         {
@@ -683,7 +703,7 @@ public static class AiEvalCommand
         }
 
         var now = DateTime.Now;
-        var markdown = AiEvalReport.Markdown(reports, endpoint, now);
+        var markdown = AiEvalReport.Markdown(reports, endpoint, now, fingerprint);
         Directory.CreateDirectory(outDirectory);
         var name = $"evals-{now:yyyyMMdd-HHmmss}";
         await File.WriteAllTextAsync(Path.Combine(outDirectory, $"{name}.md"), markdown);
