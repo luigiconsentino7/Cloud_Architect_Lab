@@ -137,9 +137,11 @@ entrevistador v2, e com o relatório trazendo o que a IA escreveu. O mapeador pa
 - **O enunciado dado ao entrevistador tinha itens sem texto:** cenários sem descrição saíam como "- Dia normal:" e
   sistemas externos com dois espaços, o que o modelo lia como "não definido". O teste novo percorre todas as sementes e
   níveis (eram ≈ 80 itens assim).
-- **Decisão: o padrão passa a ser `gemma3:4b`**, com o `qwen2.5:3b` como a opção rápida (`Ai:Ollama:Model`). Os dois
-  passam no S4, então a escolha é de confiabilidade e escrita contra velocidade; para um app em que a nota é
-  determinística e a IA só personaliza, explica e comenta, errar menos pesa mais que responder em 0,5 s.
+- **Decisão (mantida em 18/11/2026): o padrão é `gemma3:4b`**, com o `qwen2.5:3b` como a opção rápida
+  (`Ai:Ollama:Model`). Os dois passam no S4, então a escolha é de confiabilidade e escrita contra velocidade; para um
+  app em que a nota é determinística e a IA só personaliza, explica e comenta, errar menos pesa mais que responder em
+  0,5 s. Uma rodada de 18/11 (18:37, ainda com os prompts anteriores) repetiu o resultado das 17:51 caso a caso no
+  mapeador e no entrevistador, então as diferenças entre os modelos não são ruído.
 
 Mudanças a partir desta rodada (ainda não medidas num Ollama real): mapeador v3 (`funcao` → `componente` →
 `catalogId`, definição por função técnica, nomes de time como anotação, exemplos com classes que não estão no dataset),
@@ -151,7 +153,8 @@ suposição de que o gemma3:4b passa dos 4 GB de VRAM continua sem medida.
 ## O que fica para as próximas fases ([10](10-roadmap-e-riscos.md))
 
 - Repetir o `lab ai eval` com os prompts da segunda rodada (mapeador v3, entrevistador v3, personalizador v2, narrador
-  que rejeita parágrafo cortado), medir o ganho de velocidade do gemma3:4b com `--context 4096` e confirmar o padrão.
+  que rejeita parágrafo cortado) e medir o ganho de velocidade do gemma3:4b com `--context 4096`. O padrão `gemma3:4b`
+  está decidido: a rodada serve para ajustar os prompts, não para escolher o modelo.
 - Fase 2: replay da simulação no canvas, comparação entre tentativas, cenários extras (soak, queda de região, crash
   entre gravar e publicar), recomendador, 25+ conquistas, ponte manual com o claude.ai, porta `IFlowRanker`, métricas
   OpenTelemetry e motor em WebAssembly no CI.
