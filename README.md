@@ -32,7 +32,8 @@ problemas estão em [docs/como-testar.md](docs/como-testar.md).
 ## Rodar a partir do código
 
 **Requisitos:** [.NET SDK 10](https://dotnet.microsoft.com/download) (10.0.404 ou mais novo) e
-[Node.js 22](https://nodejs.org) para gerar a interface. O Ollama é opcional.
+[Node.js](https://nodejs.org) 22.22.3+, 24.15+ ou 26 (as versões que o Angular 22 aceita) para gerar a interface. O
+Ollama é opcional.
 
 Um comando gera a interface e sobe o app, que abre no navegador. No PowerShell, na pasta do repositório:
 
@@ -46,8 +47,9 @@ No Linux, macOS ou Git Bash:
 ./app.sh
 ```
 
-Opções do app vão no fim (ex.: `.\app.cmd --Ai:Mode=none`). O script roda `npm ci` e `npm run build:app` em `web/` e
-depois `dotnet run -c Release --no-launch-profile` em `src/Lab.App`.
+Opções do app vão no fim (ex.: `.\app.cmd --Ai:Mode=none`). O script confere a versão do Node.js, roda `npm ci` em
+`web/` só na primeira vez ou quando as dependências mudam, gera a interface (`npm run build:app`) e sobe o app com
+`dotnet run -c Release --no-launch-profile` em `src/Lab.App`.
 
 O app abre em <http://localhost:5080> e só escuta em `localhost`. O banco fica na pasta de dados do usuário
 (`%APPDATA%\CloudArchitectLab` no Windows, `~/Library/Application Support/CloudArchitectLab` no macOS,

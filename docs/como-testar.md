@@ -25,8 +25,8 @@ A versão aparece no topo da tela, ao lado do nome (`v0.1.0-teste.N (abc1234)`).
 
 ### Rodar a partir do código (para testar uma branch ou um pull request)
 
-Com o [.NET SDK 10](https://dotnet.microsoft.com/download) e o [Node.js 22](https://nodejs.org) instalados, na pasta
-do repositório, pegue a versão que quer testar e rode o atalho, que gera a interface e abre o app no navegador:
+Com o [.NET SDK 10](https://dotnet.microsoft.com/download) e o [Node.js](https://nodejs.org) 22.22.3+, 24.15+ ou 26
+instalados (o Angular 22 recusa as outras versões; confira com `node --version`), na pasta do repositório, pegue a versão que quer testar e rode o atalho, que gera a interface e abre o app no navegador:
 
 ```powershell
 git fetch origin
@@ -126,6 +126,8 @@ e substitua a pasta do app.
 | A IA demora para responder | Na primeira pergunta o Ollama carrega o modelo na memória (alguns segundos); com o `gemma3:4b` numa GPU de 4 GB, cada resposta leva de 2 a 15 s |
 | Quero a IA mais rápida | Feche o app, baixe o `qwen2.5:3b` (`ollama pull qwen2.5:3b`) e abra com `.\Lab.App.exe --Ai:Ollama:Model=qwen2.5:3b` (mais rápido e menos cuidadoso) |
 | Quero testar sem IA mesmo com o Ollama aberto | `.\Lab.App.exe --Ai:Mode=none` |
+| `app.cmd`: "O Node.js v… não serve para o Angular 22" | Atualize o Node.js (`winget install OpenJS.NodeJS.LTS`), abra o terminal de novo e confira com `node --version` |
+| `app.cmd`: o `npm ci` falha com EPERM ou EBUSY | A pasta está no OneDrive (ou o antivírus está segurando arquivos): mova o repositório para fora dele, como `C:\dev\Cloud_Architect_Lab`, ou pause a sincronização |
 
 ## 7. Limites conhecidos desta versão
 
