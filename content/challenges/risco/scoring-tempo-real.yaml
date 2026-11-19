@@ -1,0 +1,153 @@
+id: risco/scoring-tempo-real
+version: 1
+title: Antifraude com scoring em tempo real
+summary: Pontue cada transação em menos de 100 ms com features atualizadas por streaming, sem parar quando o modelo falhar.
+track: risco
+domain: risco e antifraude
+tags: [antifraude, feature-store, streaming, baixa-latencia, fallback]
+difficulties: [senior, staff]
+
+variables:
+  baselineRps:
+    description: Requisições por segundo (pontuações + eventos de comportamento)
+    default: 2000
+    step: 100
+    ranges: { senior: [1000, 2000], staff: [2000, 3500] }
+
+narrative: |
+  A Fintech Sentinela pontua o risco de cada transação (PIX, cartão, TED) antes da aprovação: o autorizador espera a
+  nota por no máximo 100 ms. A nota usa features recentes do cliente (quantas transações nos últimos minutos, valor
+  médio, dispositivos novos), atualizadas a partir de um fluxo de eventos de comportamento.
+
+  O modelo de machine learning roda num serviço próprio que às vezes fica lento. Se ele falhar, a transação não pode
+  ficar sem resposta: regras simples precisam decidir. São {{ baselineRps | n0 }} requisições por segundo, e o dobro em
+  datas comerciais.
+
+useCases:
+  - id: UC-1
+    name: Pontuar transação
+    description: Features do cliente + modelo → nota de risco.
+    entryClient: client.partner
+    requiredCapabilities:
+      - { capability: authenticate }
+      - { capability: risk-score, before: respond, description: "calcular a nota de risco com o modelo" }
+      - { capability: external-call, target: "external:modelo", description: "O modelo de ML calcula a nota." }
+    negativePaths:
+      - { dependency: "external:modelo", expect: fallback, description: "Sem o modelo, regras simples decidem." }
+  - id: UC-2
+    name: Atualizar features
+    description: Eventos de comportamento atualizam as features do cliente.
+    entryClient: client.partner
+    requiredCapabilities:
+      - { capability: publish-event }
+      - { capability: durable-write }
+
+externalSystems:
+  - { id: "external:modelo", name: "Serviço de modelos (ML)", latency: { p50: 15ms, p99: 60ms }, availability: 0.999, idempotent: true }
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 0.4, payloadKb: 2, computeCostMs: { p50: 2, p99: 8 } }
+    UC-2: { share: 0.6, payloadKb: 1, computeCostMs: { p50: 1, p99: 4 } }
+  dailyPattern: { peakHoursPerDay: 4, peakMultiplier: 2 }
+  storedGb: 300
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Dia normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 30s, warmup: 10s } }
+    - id: data-comercial
+      name: Data comercial (2x)
+      kind: load
+      visibility: public
+      load: { profile: ramp, fromRps: "{{ baselineRps }}", toRps: "{{ baselineRps * 2 }}", rampFor: 10s, holdFor: 30s, warmup: 10s }
+    - id: modelo-lento
+      name: Modelo lento
+      kind: chaos
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: latency-injection, target: "external:modelo", addMs: { p50: 150, p99: 600 }, at: 10s, for: 20s } ]
+    - id: az-outage
+      name: Queda de uma zona
+      kind: chaos
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: zone-outage, zone: a, at: 12s, for: 15s } ]
+  slos:
+    - { id: SLO-1, useCase: UC-1, metric: latency.p99, max: 100ms, scenarios: [baseline, data-comercial, modelo-lento], description: "nota em até 100 ms (p99)" }
+    - { id: SLO-2, useCase: UC-1, metric: success-rate, min: 99.95%, scenarios: [baseline, data-comercial, modelo-lento, az-outage], description: "sucesso de 99,95%" }
+    - { id: SLO-3, useCase: UC-2, metric: async-completion.p95, max: 2s, scenarios: [baseline, data-comercial], description: "feature atualizada em até 2 s (p95)" }
+    - { id: SLO-4, metric: lost-events, max: 0, scenarios: [az-outage], description: "nenhum evento de comportamento perdido" }
+
+constraints:
+  budgetUsdMonth: "{{ round(3000 + baselineRps * 8) }}"
+  dataResidencyBrazil: true
+  compliance: [lgpd]
+  requireEncryptionAtRest: true
+
+competencies: [baixa-latencia, resiliencia, mensageria]
+
+hints:
+  - { level: 1, text: "100 ms contando a rede do parceiro. Quanto você pode esperar pelo modelo, e o que faz quando ele não responde?" }
+  - { level: 2, text: "As features precisam estar prontas na hora da consulta. Onde elas ficam para uma leitura de poucos milissegundos?" }
+  - { level: 3, text: "Feature store num chave-valor alimentado por stream; modelo com timeout curto, circuit breaker e regras locais de fallback." }
+
+clarifications:
+  - question: O autorizador é o cliente da API?
+    keywords: [cliente, autorizador, quem chama]
+    answer: Sim. Os sistemas de autorização (cartão, PIX, TED) chamam a API de scoring por uma rede privada.
+
+reference:
+  rationale: >-
+    O serviço de scoring valida o token de serviço (identidade de máquina), lê as features num chave-valor regional e
+    chama o modelo com timeout de 45 ms e circuit breaker; se o modelo falhar, regras simples guardadas no mesmo
+    chave-valor decidem (ele não é afetado pela queda de uma zona). Os eventos de comportamento entram num stream
+    particionado pelo cliente e um processador de stream atualiza as features.
+  nodes:
+    - { id: auth, component: client.partner, label: Autorizadores }
+    - { id: lb, archetype: network.load-balancer, label: Balanceador interno }
+    - id: scoring
+      archetype: compute.service
+      label: scoring-service
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 250)) }}", max: "{{ max(6, ceil(baselineRps / 80)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        responsibilities: [risk-score, authenticate]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - { id: features, archetype: data.key-value, label: feature-store, config: { partitionKey: clienteId } }
+    - { id: model, external: "external:modelo", label: Modelo de ML }
+    - { id: idp, archetype: security.identity, label: identidade-de-servicos }
+    - id: ingest
+      archetype: compute.service
+      label: ingestao-eventos
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 600)) }}", max: "{{ max(6, ceil(baselineRps / 200)) }}" }
+        vcpu: 1
+        zones: [a, b, c]
+        responsibilities: [authenticate]
+        observability: { metrics: true, logs: true, tracing: true }
+    - { id: stream, archetype: messaging.stream, label: eventos-comportamento, config: { partitions: "{{ max(16, ceil(baselineRps / 20)) }}", partitionKey: clienteId } }
+    - id: processor
+      archetype: compute.stream-processor
+      label: calculo-features
+      config:
+        parallelism: "{{ max(4, ceil(baselineRps / 500)) }}"
+        vcpu: 2
+        zones: [a, b, c]
+        idempotency: { enabled: true, storeNodeId: features }
+        observability: { metrics: true, logs: true, tracing: true }
+  edges:
+    - { id: e01, from: auth, to: lb }
+    - { id: e02, from: lb, to: scoring, config: { timeoutMs: 90 } }
+    - { id: e03, from: scoring, to: features, config: { ops: [ { op: read, count: 1 } ] } }
+    - { id: e04, from: scoring, to: model, config: { timeoutMs: 45, circuitBreaker: { enabled: true, errorRateThreshold: 0.3, openMs: 10000 } } }
+    - { id: e05, from: scoring, to: features, config: { trigger: on-failure, triggerOf: e04, ops: [ { op: read, count: 1 } ] } }
+    - { id: e06, from: auth, to: lb }
+    - { id: e07, from: lb, to: ingest, config: { timeoutMs: 200 } }
+    - { id: e08, from: ingest, to: stream }
+    - { id: e09, from: stream, to: processor, config: { batchSize: 50 } }
+    - { id: e10, from: processor, to: features, config: { ops: [ { op: write, count: 1 } ] } }
+  flows:
+    UC-1: [e01, e02, e03, e04, e05]
+    UC-2: [e06, e07, e08, e09, e10]

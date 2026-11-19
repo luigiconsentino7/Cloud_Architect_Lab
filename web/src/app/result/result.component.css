@@ -1,0 +1,76 @@
+:host { display: block; max-width: 1100px; margin: 0 auto; padding: 22px 20px 60px; }
+h1 { margin: 0; font-size: 26px; }
+h2 { font-size: 17px; margin: 0 0 10px; }
+h3 { font-size: 14px; margin: 0 0 4px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.error { color: var(--danger); }
+.ok { color: var(--ok); }
+.bad { color: var(--danger); }
+
+.running { text-align: center; padding: 60px 0; }
+.progress { height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; max-width: 520px; margin: 18px auto 8px; }
+.progress div { height: 100%; background: var(--accent); transition: width 0.4s ease; }
+
+.head { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: 'rank score xp' 'rank links links'; gap: 6px 18px; align-items: center; margin-bottom: 18px; }
+.head .rank { grid-area: rank; }
+.score { grid-area: score; }
+.xp { grid-area: xp; text-align: right; }
+.xp strong { font-size: 22px; display: block; color: var(--accent); }
+.xp small { color: var(--muted); }
+.links { grid-area: links; display: flex; gap: 8px; }
+.cap { margin: 4px 0 0; color: var(--muted); }
+.cap.applied { color: var(--danger); font-weight: 600; }
+
+.rank { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 22px; font-size: 44px; font-weight: 800; color: white; }
+.rank-s { background: linear-gradient(135deg, #7048e8, #e64980); }
+.rank-a { background: #2f9e44; }
+.rank-b { background: #1c7ed6; }
+.rank-c { background: #f08c00; }
+.rank-d { background: #868e96; }
+
+.block { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 14px 0; background: var(--surface); }
+.summary li { margin: 4px 0; }
+.impact { display: inline-block; min-width: 42px; font-variant-numeric: tabular-nums; color: var(--danger); font-weight: 700; }
+
+.dims { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dims td { padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.dims .name { width: 210px; }
+.dims .name small { color: var(--muted); display: block; }
+.dims .bar { width: 160px; }
+.dims .bar div { height: 10px; border-radius: 999px; background: var(--ok); margin-top: 4px; }
+.dims .bar div.low { background: var(--danger); }
+.dims .value { width: 44px; text-align: right; font-weight: 700; }
+.dims .basis { color: var(--muted); font-size: 12px; }
+.pen { display: inline-block; margin-left: 8px; }
+
+.improvement { border-left: 3px solid var(--line); padding: 6px 10px; margin: 6px 0; }
+.improvement header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; cursor: pointer; }
+.improvement .sev { color: var(--muted); font-size: 12px; margin-left: auto; }
+.improvement .body { font-size: 13.5px; margin-top: 6px; }
+.sev-critical { border-left-color: var(--danger); }
+.sev-high { border-left-color: var(--warn); }
+.tag { font-size: 11px; padding: 0 8px; border-radius: 999px; background: var(--line); }
+.tag.danger { background: var(--danger); color: white; }
+.evidence { font-size: 13px; color: var(--text); background: var(--surface-2); border-radius: 8px; padding: 8px 8px 8px 26px; }
+.strengths li { margin: 4px 0; }
+
+.scenario { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.scenario.fail h3 { color: var(--danger); }
+.scenario ul { margin: 2px 0; padding-left: 18px; font-size: 13px; }
+
+.scenario-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.scenario-tabs button.active { background: var(--accent); color: white; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+
+.cost { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cost td { padding: 4px; border-bottom: 1px solid var(--line); }
+.cost .value { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.reference .ref-canvas { height: 460px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin: 10px 0; }
+
+.narrative { border-left: 3px solid var(--accent); }
+.narrative h2 small { font-weight: 400; font-size: 12px; }
+.narrative p { line-height: 1.55; }
+.narrative button { margin-left: 8px; }
+.small { font-size: 12px; }

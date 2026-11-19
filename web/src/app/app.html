@@ -1,0 +1,24 @@
+<header class="top">
+  <a routerLink="/" class="brand">☁️ Cloud Architect Lab</a>
+  @if (version(); as v) {
+    <span class="version" title="Versão do app (cite-a ao relatar um problema)">v{{ v }}</span>
+  }
+  <nav>
+    <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Desafios</a>
+    <a routerLink="/perfil" routerLinkActive="active">Perfil</a>
+  </nav>
+  @if (progress(); as p) {
+    <a routerLink="/perfil" class="progress" [title]="fmt.int(p.totalXp) + ' XP'">
+      <span>Nv {{ p.level }} · {{ p.title }}</span>
+      <span class="bar"><span [style.width]="percent(p) + '%'"></span></span>
+    </a>
+  }
+</header>
+<main>
+  <router-outlet />
+</main>
+<div class="toasts" aria-live="polite">
+  @for (t of realtime.toasts(); track t.id) {
+    <div class="toast toast-{{ t.kind }}">{{ t.text }}</div>
+  }
+</div>

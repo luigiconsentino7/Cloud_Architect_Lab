@@ -53,8 +53,8 @@ flowchart LR
 
 1. **Home.** Nível, XP, streak, radar de competências, desafios recomendados e "Continuar tentativa".
 2. **Novo desafio.** Você escreve o contexto em linguagem livre e escolhe, logo acima da caixa de texto, **Provedor** (`AWS · Azure · GCP · Genérico`), **Dificuldade** (Júnior, Pleno, Sênior, Staff ou Automática) e **Modo**. O que acontece em seguida depende do modo de IA configurado (ver [06 — IA](06-ia.md)):
-   - *Sem IA (padrão):* o app busca na biblioteca de desafios-semente (por domínio, tags e texto) e propõe os 3 mais aderentes, já ajustados ao provedor e à dificuldade por variação procedural: volumetria, SLOs, restrições e "pegadinhas" como conta quente ou SPI degradado.
-   - *IA local (Ollama) ou Claude API:* a IA faz até 2 perguntas de calibração e personaliza uma semente para o seu contexto (narrativa, números, restrições). O resultado sempre passa pela validação do motor antes de aparecer.
+   - *Sem IA (sempre disponível):* o app busca na biblioteca de desafios-semente (por domínio, tags e texto) e propõe os 3 mais aderentes, já ajustados ao provedor e à dificuldade por variação procedural: volumetria, SLOs, restrições e "pegadinhas" como conta quente ou SPI degradado.
+   - *IA local (Ollama, o padrão na sua máquina) ou Claude API:* a IA faz até 2 perguntas de calibração e personaliza uma semente para o seu contexto (narrativa, números, restrições). O resultado sempre passa pela validação do motor antes de aparecer.
    - *Ponte com o claude.ai (opcional, Fase 2):* o app gera um prompt pronto; você cola no claude.ai, cola a resposta de volta e o app valida.
 3. **Cartão do desafio.** Título, narrativa, casos de uso (UC-1…n), SLOs, volumetria, restrições (regulatórias, orçamento, região), competências avaliadas, número de cenários ocultos e recompensa de XP. Ações: **Aceitar**, **Outro**, **Ajustar** (ex.: "menos volumetria", "foco em resiliência").
 4. **Workspace.** Canvas com a paleta do provedor, inspector de propriedades, painel de problemas (validação ao vivo) e painel do entrevistador (esclarecimentos e dicas com custo de XP).

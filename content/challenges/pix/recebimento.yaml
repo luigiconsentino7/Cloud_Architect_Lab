@@ -1,0 +1,171 @@
+id: pix/recebimento
+version: 1
+title: Recebimento de PIX e aviso ao cliente
+summary: Credite PIX recebidos do SPI exatamente uma vez, responda rápido ao Banco Central e avise o cliente.
+track: pix
+domain: pagamentos instantâneos
+tags: [pix, spi, idempotencia, outbox, consumidor-idempotente]
+difficulties: [pleno, senior, staff]
+
+variables:
+  baselineRps:
+    description: PIX recebidos por segundo num dia normal
+    default: 600
+    step: 50
+    ranges: { pleno: [200, 500], senior: [500, 1000], staff: [1000, 1500] }
+
+twists:
+  - id: push-instavel
+    title: Provedor de push instável
+    description: O provedor de push cai por alguns segundos no meio do teste.
+    minDifficulty: senior
+    ops:
+      - op: append
+        path: testPlan.scenarios
+        value:
+          id: push-fora
+          name: Push fora do ar
+          kind: chaos
+          visibility: hidden
+          load: { ref: baseline }
+          faults: [ { type: dependency-outage, target: "external:push", at: 10s, for: 10s } ]
+      - op: append
+        path: testPlan.slos
+        value: { id: SLO-6, metric: lost-events, max: 0, scenarios: [push-fora], description: "nenhum aviso perdido" }
+
+narrative: |
+  O Banco Nuvem recebe em média {{ baselineRps | n0 }} PIX por segundo. Cada PIX chega do SPI como uma mensagem que o
+  banco precisa creditar e confirmar rapidamente: se a confirmação demora, o SPI considera a transação com problema.
+
+  O SPI pode reenviar a mesma mensagem (mesmo endToEndId) e o crédito não pode acontecer duas vezes. Depois do crédito,
+  o cliente recebe um push com o valor e quem pagou. No 5º dia útil, o volume triplica.
+
+useCases:
+  - id: UC-1
+    name: Creditar PIX recebido
+    description: Mensagem do SPI → crédito atômico → confirmação → aviso ao cliente.
+    entryClient: client.partner
+    monetary: true
+    requiredCapabilities:
+      - { capability: authenticate, description: "Só o SPI (mTLS) entrega PIX." }
+      - { capability: idempotency-check, description: "O mesmo endToEndId não credita duas vezes." }
+      - { capability: atomic-balance-update, before: respond, description: "O crédito é atômico e acontece antes da confirmação." }
+      - { capability: publish-event, description: "Um evento avisa os demais sistemas." }
+      - { capability: notify, description: "O cliente recebe um push." }
+  - id: UC-2
+    name: Consultar extrato
+    description: O cliente consulta os últimos lançamentos.
+    entryClient: client.mobile
+
+externalSystems:
+  - { id: "external:push", name: "Provedor de push", latency: { p50: 80ms, p99: 300ms }, availability: 0.999, idempotent: false, sideEffect: true }
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 0.7, payloadKb: 2, computeCostMs: { p50: 3, p99: 12 } }
+    UC-2: { share: 0.3, payloadKb: 4, computeCostMs: { p50: 2, p99: 6 } }
+  cacheability: { UC-2: 0.6 }
+  dailyPattern: { peakHoursPerDay: 2, peakMultiplier: 2 }
+  storedGb: 300
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Dia normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 30s, warmup: 10s } }
+    - id: quinto-dia-util
+      name: 5º dia útil (3x)
+      kind: load
+      visibility: public
+      load: { profile: ramp, fromRps: "{{ baselineRps }}", toRps: "{{ baselineRps * 3 }}", rampFor: 15s, holdFor: 30s, warmup: 10s }
+    - id: reenvios
+      name: Reenvios do SPI
+      kind: integrity
+      visibility: hidden
+      load: { ref: baseline }
+      faults:
+        - { type: duplicate-delivery, probability: 0.03 }
+        - { type: client-retry, onTimeoutMs: 800, sameIdempotencyKey: true }
+    - id: az-outage
+      name: Queda de uma zona
+      kind: chaos
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: zone-outage, zone: b, at: 12s, for: 15s } ]
+  slos:
+    - { id: SLO-1, useCase: UC-1, metric: latency.p99, max: 500ms, scenarios: [baseline, quinto-dia-util], description: "confirmação ao SPI em até 500 ms (p99)" }
+    - { id: SLO-2, useCase: UC-1, metric: success-rate, min: 99.95%, scenarios: [baseline, quinto-dia-util, az-outage], description: "sucesso de 99,95%" }
+    - { id: SLO-3, useCase: UC-1, metric: async-completion.p95, max: 10s, scenarios: [baseline], description: "push em até 10 s (p95)" }
+    - { id: SLO-4, metric: duplicate-effects, max: 0, scenarios: [reenvios], description: "nenhum crédito ou aviso duplicado" }
+    - { id: SLO-5, useCase: UC-2, metric: latency.p99, max: 300ms, scenarios: [baseline], description: "extrato em até 300 ms (p99)" }
+
+constraints:
+  budgetUsdMonth: "{{ round(4000 + baselineRps * 40) }}"
+  dataResidencyBrazil: true
+  compliance: [lgpd, bacen-4893]
+  requireEncryptionAtRest: true
+
+competencies: [consistencia, mensageria, resiliencia]
+
+hints:
+  - { level: 1, text: "O SPI pode entregar a mesma mensagem duas vezes. O que identifica um PIX de forma única?" }
+  - { level: 2, text: "O push não precisa estar no caminho da confirmação ao SPI. O que pode ficar para depois?" }
+  - { level: 3, text: "Crédito e evento na mesma transação (outbox); o consumidor do push deduplica pelo endToEndId." }
+
+clarifications:
+  - question: Como o SPI se autentica?
+    keywords: [autenticação, mtls, certificado, spi]
+    answer: Por mTLS, com o certificado do Banco Central. Considere que o gateway valida o certificado.
+  - question: O push precisa sair antes da confirmação?
+    keywords: [push, antes, confirmação, ordem]
+    answer: Não. O SPI só espera o crédito; o aviso ao cliente pode chegar alguns segundos depois.
+
+reference:
+  rationale: >-
+    O gateway valida o mTLS do SPI; o serviço credita numa transação de um SQL distribuído entre zonas (a mesma
+    transação grava o endToEndId, então o reenvio não credita de novo) e grava o evento no outbox. O push sai de um
+    consumidor idempotente fora do caminho da confirmação. O extrato lê do cache e só vai ao banco no miss.
+  nodes:
+    - { id: spi, component: client.partner, label: SPI }
+    - { id: app, component: client.mobile, label: App }
+    - { id: waf, archetype: edge.waf, label: WAF }
+    - { id: gw, archetype: edge.api-gateway, label: API de recebimento, config: { auth: mtls, waf: true, throttle: { rps: "{{ baselineRps * 10 }}", burst: "{{ baselineRps * 5 }}" } } }
+    - id: svc
+      archetype: compute.service
+      label: recebimento-service
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 90)) }}", max: "{{ max(6, ceil(baselineRps / 30)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - id: db
+      archetype: data.relational-distributed
+      label: contas
+      config: { nodes: "{{ max(3, ceil(baselineRps / 450)) }}" }
+      providers:
+        azure: { component: azure.cosmosdb, config: { partitionKey: contaId } }
+    - { id: cache, archetype: data.cache, label: cache-extrato, config: { nodes: 2, replicas: 1, multiAz: true, zones: [a, b] } }
+    - { id: events, archetype: messaging.queue, label: creditos, config: { dlq: { enabled: true, maxReceiveCount: 5 }, observability: { alarms: true } } }
+    - id: notifier
+      archetype: compute.function
+      label: avisos
+      config:
+        reservedConcurrency: 600
+        idempotency: { enabled: true, storeNodeId: dedupe }
+        observability: { metrics: true, logs: true, tracing: true }
+    - { id: dedupe, archetype: data.key-value, label: dedupe-avisos }
+    - { id: push, external: "external:push", label: Push }
+  edges:
+    - { id: e01, from: spi, to: waf, config: { idempotencyKey: true } }
+    - { id: e02, from: waf, to: gw }
+    - { id: e03, from: gw, to: svc, config: { timeoutMs: 450 } }
+    - { id: e04, from: svc, to: db, config: { ops: [ { op: transaction, count: 1 } ] } }
+    - { id: e05, from: svc, to: events, config: { delivery: outbox } }
+    - { id: e06, from: events, to: notifier, config: { batchSize: 10 } }
+    - { id: e07, from: notifier, to: dedupe, config: { ops: [ { op: conditional-write, count: 1 } ] } }
+    - { id: e08, from: notifier, to: push, config: { timeoutMs: 1000, retries: { max: 3, backoff: exponential-jitter, baseMs: 200 } } }
+    - { id: e09, from: app, to: waf }
+    - { id: e10, from: svc, to: cache, config: { ops: [ { op: read, count: 1 } ] } }
+    - { id: e11, from: svc, to: db, config: { trigger: on-cache-miss, triggerOf: e10, ops: [ { op: read, count: 1 } ] } }
+  flows:
+    UC-1: [e01, e02, e03, e04, e05, e06, e07, e08]
+    UC-2: [e09, e02, e03, e10, e11]

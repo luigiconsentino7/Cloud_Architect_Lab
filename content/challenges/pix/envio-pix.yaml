@@ -1,0 +1,215 @@
+# Semente: Envio de PIX (trilha PIX e pagamentos instantâneos).
+# Valores com unidade (120s, 700ms, 99.95%) são convertidos pelo instanciador; dentro de {{ }} use números puros.
+id: pix/envio-pix
+version: 1
+title: Envio de PIX da FinBank
+summary: Projete o envio de PIX de um banco digital com idempotência, débito atômico e proteção contra a lentidão do SPI.
+track: pix
+domain: pagamentos instantâneos
+tags: [pix, spi, idempotencia, outbox, circuit-breaker, pagamentos]
+difficulties: [pleno, senior, staff]
+
+variables:
+  baselineRps:
+    description: Transações por segundo num dia normal
+    default: 1000
+    step: 50
+    ranges: { pleno: [300, 600], senior: [700, 1400], staff: [1500, 1900] }
+
+twists:
+  - id: spi-degradado
+    title: SPI degradado
+    description: O SPI está mais lento que o normal e cai por alguns segundos durante o teste.
+    minDifficulty: senior
+    ops:
+      - { op: merge, path: "externalSystems[external:spi]", value: { latency: { p50: 400, p99: 1200 } } }
+      - op: append
+        path: testPlan.scenarios
+        value:
+          id: spi-outage
+          name: SPI fora do ar
+          kind: chaos
+          visibility: hidden
+          load: { ref: baseline }
+          faults: [ { type: dependency-outage, target: "external:spi", at: 25s, for: 15s } ]
+      - { op: append, path: "testPlan.slos[SLO-2].scenarios", value: spi-outage }
+  - id: orcamento-apertado
+    title: Orçamento apertado
+    description: A diretoria cortou 20% do orçamento de nuvem.
+    ops:
+      - { op: set, path: constraints.budgetUsdMonth, value: "{{ round((5000 + baselineRps * 36) * 0.8) }}" }
+  - id: auditoria-obrigatoria
+    title: Auditoria obrigatória
+    description: O compliance exige trilha de auditoria imutável de cada transação — e liberou 30% a mais de orçamento para isso.
+    minDifficulty: senior
+    ops:
+      - { op: set, path: constraints.requireAuditLog, value: true }
+      - { op: set, path: constraints.budgetUsdMonth, value: "{{ round((5000 + baselineRps * 36) * 1.3) }}" }
+      - op: append
+        path: reference.nodes
+        value: { id: audit, archetype: data.object-storage, label: trilha-auditoria, config: { objectLock: true } }
+      - op: append
+        path: reference.edges
+        value: { id: e13, from: notifier, to: audit, config: { ops: [ { op: write, count: 1 } ] } }
+      - { op: append, path: reference.flows.UC-1, value: e13 }
+
+narrative: |
+  A FinBank é um banco digital com 8 milhões de clientes. O app processa em média {{ baselineRps | n0 }} PIX por segundo
+  e, no dia do pagamento, o volume quintuplica em poucos minutos.
+
+  Desenhe o envio de PIX: o cliente autentica, o banco confere se a requisição já foi processada (o app repete a chamada
+  quando a rede oscila), debita o saldo de forma atômica, envia a ordem ao SPI do Banco Central e avisa o recebedor por push.
+  O cliente também consulta o status da transação.
+
+  O SPI responde em ~250 ms na mediana, mas tem dias ruins. Os dados precisam ficar no Brasil.
+
+useCases:
+  - id: UC-1
+    name: Enviar PIX
+    description: Débito atômico, ordem ao SPI e evento de notificação.
+    entryClient: client.mobile
+    monetary: true
+    requiredCapabilities:
+      - { capability: authenticate, description: "Só cliente autenticado envia PIX." }
+      - { capability: idempotency-check, description: "A mesma requisição repetida não pode gerar outro PIX." }
+      - { capability: atomic-balance-update, before: respond, description: "O saldo é debitado de forma atômica antes da resposta." }
+      - { capability: external-call, target: "external:spi", description: "A ordem vai ao SPI." }
+      - { capability: publish-event, description: "Um evento avisa os demais sistemas." }
+      - { capability: notify, description: "O recebedor é avisado por push." }
+    negativePaths:
+      - { dependency: "external:spi", expect: fallback, description: "Se o SPI falhar, a transação fica pendente e é reconciliada depois." }
+  - id: UC-2
+    name: Consultar status
+    description: O cliente consulta o status de um PIX enviado.
+    entryClient: client.mobile
+
+externalSystems:
+  - { id: "external:spi", name: "SPI (BACEN)", description: "Sistema de Pagamentos Instantâneos", latency: { p50: 250ms, p99: 800ms }, availability: 0.9999, idempotent: true, sideEffect: true, monetary: true }
+  - { id: "external:push", name: "Provedor de push", latency: { p50: 80ms, p99: 300ms }, availability: 0.999, idempotent: false, sideEffect: true }
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 0.8, payloadKb: 2, computeCostMs: { p50: 4, p99: 15 } }
+    UC-2: { share: 0.2, payloadKb: 1, computeCostMs: { p50: 1, p99: 4 } }
+  cacheability: { UC-2: 0.7 }
+  dailyPattern: { peakHoursPerDay: 2, peakMultiplier: 3 }
+  storedGb: 200
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Dia normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 40s, warmup: 10s } }
+    - id: payday-peak
+      name: Dia do pagamento (5x)
+      kind: load
+      visibility: public
+      load: { profile: ramp, fromRps: "{{ baselineRps }}", toRps: "{{ baselineRps * 5 }}", rampFor: 20s, holdFor: 40s, warmup: 10s }
+    - id: az-outage
+      name: Queda de uma zona
+      kind: chaos
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: zone-outage, zone: a, at: 15s, for: 20s } ]
+    - id: spi-slow
+      name: SPI lento
+      kind: chaos
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: latency-injection, target: "external:spi", addMs: { p50: 800, p99: 3000 }, at: 12s, for: 25s } ]
+    - id: duplicates
+      name: Reentregas e retries do app
+      kind: integrity
+      visibility: hidden
+      load: { ref: baseline }
+      faults:
+        - { type: duplicate-delivery, probability: 0.02 }
+        - { type: client-retry, onTimeoutMs: 1500, sameIdempotencyKey: true }
+  slos:
+    - { id: SLO-1, useCase: UC-1, metric: latency.p99, max: 1000ms, scenarios: [baseline, payday-peak], description: "p99 do envio até 1 s" }
+    - { id: SLO-2, useCase: UC-1, metric: success-rate, min: 99.95%, scenarios: [baseline, payday-peak, az-outage, spi-slow], description: "sucesso de 99,95%" }
+    - { id: SLO-3, useCase: UC-1, metric: async-completion.p95, max: 5s, scenarios: [baseline], description: "recebedor avisado em até 5 s (p95)" }
+    - { id: SLO-4, metric: duplicate-effects, max: 0, scenarios: [duplicates], description: "nenhum efeito duplicado" }
+    - { id: SLO-5, useCase: UC-2, metric: latency.p99, max: 200ms, scenarios: [baseline], description: "consulta em até 200 ms (p99)" }
+
+constraints:
+  budgetUsdMonth: "{{ round(5000 + baselineRps * 36) }}"
+  dataResidencyBrazil: true
+  compliance: [lgpd, bacen-4893]
+  requireEncryptionAtRest: true
+
+competencies: [resiliencia, consistencia, mensageria, escalabilidade]
+
+hints:
+  - { level: 1, text: "O app repete a requisição quando a rede oscila. Como o servidor sabe que é a mesma transação?" }
+  - { level: 2, text: "O SPI é a dependência mais lenta e menos confiável. O que o seu serviço faz enquanto espera, e quando desiste?" }
+  - { level: 3, text: "Gravar o débito e publicar o evento são duas operações. Um outbox transacional garante as duas ou nenhuma." }
+
+clarifications:
+  - question: O SPI aceita repetir a mesma ordem?
+    keywords: [spi, repetir, retry, idempotente, endToEndId]
+    answer: Sim. Ordens com o mesmo endToEndId não geram uma segunda transferência; o SPI devolve o resultado da primeira.
+  - question: Preciso tratar o PIX agendado?
+    keywords: [agendado, agendamento, futuro]
+    answer: Não. Este desafio cobre só o envio imediato e a consulta de status.
+  - question: O push precisa chegar exatamente uma vez?
+    keywords: [push, notificação, duplicada, uma vez]
+    answer: Duplicar o push não move dinheiro, mas confunde o cliente. Conta como efeito duplicado no teste de integridade.
+
+reference:
+  rationale: >-
+    Contêineres multi-AZ no caminho síncrono (sem o teto de concorrência das funções), débito numa transação de um SQL
+    distribuído ativo-ativo entre zonas (a queda de uma zona não interrompe as escritas, ao contrário do failover de um
+    primário único), chamada ao SPI com timeout curto, circuit breaker e fila de pendências como fallback, evento publicado
+    via outbox e consumidor idempotente com dedupe para o push. A consulta de status lê do cache e só vai ao banco no miss.
+  nodes:
+    - { id: app, component: client.mobile, label: App }
+    - { id: waf, archetype: edge.waf, label: WAF }
+    - id: gw
+      archetype: edge.api-gateway
+      label: API PIX
+      config: { auth: jwt, waf: true, throttle: { rps: "{{ baselineRps * 20 }}", burst: "{{ baselineRps * 10 }}" } }
+    - id: svc
+      archetype: compute.service
+      label: pix-service
+      config:
+        instances: { min: "{{ ceil(baselineRps / 65) }}", max: "{{ ceil(baselineRps / 22) }}" }
+        vcpu: 2
+        concurrencyPerInstance: 200
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - id: db
+      archetype: data.relational-distributed
+      label: ledger
+      config: { nodes: "{{ max(3, ceil(baselineRps / 450)) }}" }
+      # Sem SQL distribuído no catálogo da Azure: Cosmos DB com redundância de zona, transação no lote da partição da conta.
+      providers:
+        azure: { component: azure.cosmosdb, config: { partitionKey: contaId } }
+    - { id: cache, archetype: data.cache, label: cache-status, config: { nodes: 2, replicas: 1, multiAz: true, zones: [a, b] } }
+    - { id: spi, external: "external:spi", label: SPI }
+    - { id: events, archetype: messaging.queue, label: eventos-pix, config: { dlq: { enabled: true, maxReceiveCount: 5 }, observability: { alarms: true } } }
+    - { id: pending, archetype: messaging.queue, label: pendencias, config: { dlq: { enabled: true, maxReceiveCount: 5 }, observability: { alarms: true } } }
+    - id: notifier
+      archetype: compute.function
+      label: notificador
+      config:
+        reservedConcurrency: 900
+        idempotency: { enabled: true, storeNodeId: dedupe }
+        observability: { metrics: true, logs: true, tracing: true }
+    - { id: push, external: "external:push", label: Push }
+    - { id: dedupe, archetype: data.key-value, label: dedupe-notificacoes }
+  edges:
+    - { id: e01, from: app, to: waf, config: { idempotencyKey: true } }
+    - { id: e02, from: waf, to: gw }
+    - { id: e03, from: gw, to: svc, config: { timeoutMs: 950 } }
+    - { id: e04, from: svc, to: db, config: { ops: [ { op: transaction, count: 1 } ] } }
+    - { id: e05, from: svc, to: spi, config: { timeoutMs: 700, circuitBreaker: { enabled: true, errorRateThreshold: 0.5, openMs: 20000 } } }
+    - { id: e06, from: svc, to: pending, config: { trigger: on-failure, triggerOf: e05, delivery: outbox } }
+    - { id: e07, from: svc, to: events, config: { delivery: outbox } }
+    - { id: e08, from: events, to: notifier, config: { batchSize: 10 } }
+    - { id: e09, from: notifier, to: dedupe, config: { ops: [ { op: conditional-write, count: 1 } ] } }
+    - { id: e10, from: notifier, to: push, config: { timeoutMs: 1000 } }
+    - { id: e11, from: svc, to: cache, config: { ops: [ { op: read, count: 1 } ] } }
+    - { id: e12, from: svc, to: db, config: { trigger: on-cache-miss, triggerOf: e11, ops: [ { op: read, count: 1 } ] } }
+  flows:
+    UC-1: [e01, e02, e03, e04, e05, e06, e07, e08, e09, e10]
+    UC-2: [e01, e02, e03, e11, e12]

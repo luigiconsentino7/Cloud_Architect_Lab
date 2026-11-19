@@ -1,0 +1,173 @@
+# Textos curados das regras de arquitetura (ARQ). Usados na revisão determinística.
+rules:
+  - id: ARQ-001
+    title: Ponto único de falha no caminho crítico
+    why: >-
+      Um componente com uma instância só, ou numa zona só, derruba o caso de uso inteiro quando falha. Em sistemas
+      financeiros isso vira transação recusada no balcão, no app e no parceiro ao mesmo tempo.
+    how: >-
+      Rode pelo menos duas instâncias em zonas diferentes, com capacidade para perder uma zona sem saturar as outras
+      (estabilidade estática). Para bancos, use standby em outra zona ou um serviço multi-AZ ativo-ativo.
+    tradeoffs: Mais réplicas custam mais e exigem que o estado fique fora da instância (sessão, cache, arquivos).
+    followUps:
+      - Se a zona onde está esse componente cair agora, o que o cliente vê e por quanto tempo?
+    studyTopics: [estabilidade estática, multi-AZ]
+    links:
+      - { title: "AWS Builders' Library — Static stability using Availability Zones", url: "https://aws.amazon.com/builders-library/static-stability-using-availability-zones/" }
+      - { title: "AWS Well-Architected — Reliability Pillar", url: "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html" }
+
+  - id: ARQ-002
+    title: Timeout ausente ou maior que o SLO
+    why: >-
+      Sem timeout, uma dependência lenta prende threads e conexões até o serviço inteiro parar. Um timeout maior que o
+      próprio SLO garante que o cliente desiste antes do servidor, que continua trabalhando para ninguém.
+    how: >-
+      Defina timeouts em cascata: cada salto com timeout menor que o do chamador, e todos abaixo do orçamento de latência
+      do caso de uso. Comece pelo p99 da dependência com alguma folga, não pelo valor padrão da biblioteca.
+    tradeoffs: Timeout curto demais gera falso negativo em picos normais de latência; meça o p99 antes de cortar.
+    followUps:
+      - Se a dependência passar a responder em 5 segundos, quantas requisições ficam presas no seu serviço?
+    studyTopics: [timeouts em cascata, orçamento de latência]
+    links:
+      - { title: "AWS Builders' Library — Timeouts, retries and backoff with jitter", url: "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/" }
+      - { title: "Google SRE — Addressing Cascading Failures", url: "https://sre.google/sre-book/addressing-cascading-failures/" }
+
+  - id: ARQ-003
+    title: Retry sem backoff com jitter
+    why: >-
+      Retries imediatos ou em intervalo fixo sincronizam os clientes: quando a dependência engasga, todos tentam de novo
+      no mesmo instante e multiplicam a carga justamente quando ela está mais fraca (retry storm).
+    how: >-
+      Use backoff exponencial com jitter, limite o número de tentativas e garanta que retries × timeout cabem no SLO.
+      Só repita operações idempotentes, e prefira repetir em uma camada só (não no cliente, no gateway e no serviço).
+    tradeoffs: Backoff aumenta a latência do pior caso; para operações interativas, poucas tentativas rápidas bastam.
+    followUps:
+      - Quantas chamadas a dependência recebe por segundo quando ela começa a falhar, contando os retries de todas as camadas?
+    studyTopics: [retry storm, backoff exponencial com jitter]
+    links:
+      - { title: "AWS Builders' Library — Timeouts, retries and backoff with jitter", url: "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/" }
+      - { title: "Azure Architecture Center — Retry pattern", url: "https://learn.microsoft.com/azure/architecture/patterns/retry" }
+
+  - id: ARQ-004
+    title: Fila sem DLQ
+    why: >-
+      Uma mensagem que sempre falha (payload inválido, bug, dado inconsistente) volta para a fila para sempre, consome
+      capacidade do consumidor e esconde o problema — ou é descartada em silêncio, conforme o serviço.
+    how: >-
+      Configure uma fila de mensagens mortas com um número máximo de entregas, alarme na profundidade da DLQ e um
+      processo para inspecionar e reprocessar o que caiu lá.
+    tradeoffs: A DLQ precisa de dono; sem alarme e sem rotina de tratamento ela só adia o problema.
+    followUps:
+      - Quem é avisado quando uma mensagem de pagamento cai na DLQ, e como ela é reprocessada?
+    studyTopics: [dead-letter queue, mensagens envenenadas]
+    links:
+      - { title: "Amazon SQS — Dead-letter queues", url: "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html" }
+      - { title: "AWS Builders' Library — Avoiding insurmountable queue backlogs", url: "https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/" }
+
+  - id: ARQ-005
+    title: Dependência externa sem circuit breaker nem fallback
+    why: >-
+      Quando um sistema de terceiros (SPI, bandeira, bureau) degrada, cada chamada passa a esperar o timeout inteiro. Sem
+      circuit breaker, o seu serviço degrada junto; sem fallback, toda transação falha.
+    how: >-
+      Coloque um circuit breaker na chamada, com timeout curto, e defina o que acontece quando ele abre: aceitar e
+      enfileirar para reconciliar depois, responder com status pendente ou usar uma decisão de contingência (stand-in).
+    tradeoffs: O fallback precisa ser seguro para o negócio; aceitar uma transação sem confirmação exige reconciliação.
+    followUps:
+      - O que acontece com as transações pendentes se a dependência ficar fora por 10 minutos?
+      - Como o circuit breaker decide voltar a chamar a dependência?
+    studyTopics: [circuit breaker, degradação controlada]
+    links:
+      - { title: "Azure Architecture Center — Circuit Breaker pattern", url: "https://learn.microsoft.com/azure/architecture/patterns/circuit-breaker" }
+      - { title: "AWS Builders' Library — Avoiding fallback in distributed systems", url: "https://aws.amazon.com/builders-library/avoiding-fallback-in-distributed-systems/" }
+
+  - id: ARQ-006
+    title: Cadeia síncrona longa demais
+    why: >-
+      Cada salto síncrono soma latência e multiplica a chance de falha: cinco serviços com 99,9% de disponibilidade em
+      série entregam 99,5%. O p99 da cadeia é pior que a soma dos p50.
+    how: >-
+      Tire do caminho síncrono o que não precisa estar na resposta (notificações, auditoria, analytics) e mova para
+      eventos. Agregue chamadas em paralelo quando forem independentes.
+    tradeoffs: Assíncrono troca latência por consistência eventual e por mais componentes para operar.
+    followUps:
+      - Quais destes passos o cliente realmente precisa esperar para ter a resposta?
+    studyTopics: [latência de cauda, disponibilidade em série]
+    links:
+      - { title: "Azure Architecture Center — Asynchronous Request-Reply pattern", url: "https://learn.microsoft.com/azure/architecture/patterns/async-request-reply" }
+
+  - id: ARQ-007
+    title: Chamada síncrona entre regiões
+    why: >-
+      Uma chamada entre regiões adiciona dezenas de milissegundos a cada requisição e acopla a disponibilidade das duas
+      regiões: a queda de uma derruba o caminho da outra.
+    how: >-
+      Mantenha o caminho síncrono dentro de uma região e replique dados entre regiões de forma assíncrona. Se precisar de
+      escrita multirregião, use um banco feito para isso e assuma o custo de latência conscientemente.
+    tradeoffs: Replicação assíncrona aceita alguma perda (RPO maior que zero) numa queda regional.
+    followUps:
+      - Qual é a latência entre as duas regiões e quanto ela pesa no seu orçamento de p99?
+    studyTopics: [arquitetura multirregião, RPO e RTO]
+    links:
+      - { title: "Google Cloud Architecture Framework — Reliability", url: "https://cloud.google.com/architecture/framework/reliability" }
+
+  - id: ARQ-008
+    title: Partições do stream mal dimensionadas
+    why: >-
+      Um stream escala por partição: poucas partições estrangulam a escrita, e consumidores além do número de partições
+      ficam ociosos. A ordenação por chave também depende da partição.
+    how: >-
+      Dimensione as partições pela vazão de pico (escrita e leitura) com folga, e o paralelismo dos consumidores pelo
+      número de partições. Escolha a chave de partição pela ordenação que o negócio exige.
+    tradeoffs: Mais partições custam mais e tornam o reparticionamento posterior mais caro.
+    followUps:
+      - Se a vazão dobrar no fechamento do mês, quantas partições você precisa e como faz a mudança sem parar?
+    studyTopics: [particionamento de streams, ordenação por chave]
+    links:
+      - { title: "Apache Kafka — Documentation (Design)", url: "https://kafka.apache.org/documentation/#design" }
+
+  - id: ARQ-009
+    title: Função serverless abrindo conexões direto no banco
+    why: >-
+      Cada execução concorrente de uma função abre a própria conexão. Num pico, centenas de execuções esgotam o limite de
+      conexões do banco relacional e todas as chamadas passam a falhar.
+    how: >-
+      Coloque um proxy de conexões gerenciado entre as funções e o banco, ou limite a concorrência da função ao que o banco
+      aguenta. Para muita concorrência, contêineres com pool de conexões são mais previsíveis.
+    tradeoffs: O proxy adiciona um salto e custo; limitar a concorrência gera throttling na função.
+    followUps:
+      - Quantas conexões o banco aceita e quantas execuções simultâneas a função atinge no pico?
+    studyTopics: [pool de conexões, concorrência serverless]
+    links:
+      - { title: "Amazon RDS Proxy", url: "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.html" }
+      - { title: "AWS Lambda — Concurrency", url: "https://docs.aws.amazon.com/lambda/latest/dg/lambda-concurrency.html" }
+
+  - id: ARQ-010
+    title: Partição quente
+    why: >-
+      Com uma chave de baixa cardinalidade (data, status, conta do varejista), as escritas caem em poucas partições, que
+      estrangulam muito antes do limite da tabela. É o caso clássico da conta quente no dia da Black Friday.
+    how: >-
+      Escolha uma chave de alta cardinalidade, espalhe chaves quentes com sufixos (write sharding) e agregue depois, ou
+      serialize as escritas da chave quente numa fila dedicada.
+    tradeoffs: Espalhar a chave complica leituras e agregações; a fila dedicada adiciona latência.
+    followUps:
+      - Qual é a chave mais quente deste fluxo no pior dia do ano, e quantas escritas por segundo ela recebe?
+    studyTopics: [partição quente, write sharding]
+    links:
+      - { title: "Amazon DynamoDB — Partition key design", url: "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html" }
+
+  - id: ARQ-011
+    title: Banco compartilhado por vários serviços
+    why: >-
+      Três ou mais serviços escrevendo no mesmo banco acoplam esquema, deploy e capacidade: uma migração ou uma consulta
+      pesada de um derruba os outros, e ninguém é dono do dado.
+    how: >-
+      Dê a cada serviço o próprio armazenamento e integre por APIs ou eventos. Leituras cruzadas podem usar uma visão
+      materializada alimentada por eventos.
+    tradeoffs: Dados separados exigem consistência eventual e mais trabalho de integração.
+    followUps:
+      - Quem é o dono deste banco e quem aprova uma mudança de esquema?
+    studyTopics: [database per service, acoplamento]
+    links:
+      - { title: "Azure Architecture Center — Data considerations for microservices", url: "https://learn.microsoft.com/azure/architecture/microservices/design/data-considerations" }

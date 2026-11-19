@@ -1,5 +1,7 @@
 # 08 — Dados e API
 
+> **Implementação:** as diferenças dos endpoints e dos eventos em relação a este documento estão em [11 — Estado da implementação](11-estado-da-implementacao.md).
+
 ## Modelo de dados
 
 SQLite, um arquivo, tabelas com prefixo por módulo. IDs UUIDv7 (`Guid.CreateVersion7()`), ordenáveis por tempo. JSON em colunas `TEXT`; séries temporais comprimidas (gzip) em `BLOB`. Sementes, catálogo, textos das regras e prompts **não** ficam no banco: são arquivos do repositório carregados na inicialização, com hash de versão.
@@ -24,7 +26,7 @@ erDiagram
 
 | Tabela | Colunas principais | Observações |
 |---|---|---|
-| `profile_profiles` | id, display_name, locale, default_provider, preferences (JSON), remote_subject | `remote_subject` = identidade do Cloudflare Access no modo remoto |
+| `profile_profiles` | id, display_name, locale, default_provider, preferences (JSON) | Um perfil local |
 | `conv_conversations` | id, profile_id, challenge_id?, kind (new-challenge, interviewer), provider, ai_mode, created_at | |
 | `conv_messages` | id, conversation_id, role, content, masked_items, created_at | |
 | `chl_challenges` | id, profile_id, seed_id, seed_version, variation (JSON), personalization (JSON), public (JSON), hidden (JSON), master_seed, reference_score, status, created_at | `hidden` nunca vai para o frontend |
@@ -75,7 +77,7 @@ Cada etapa grava seu resultado por `(evaluationId, etapa)`; reexecutar uma etapa
 
 ## API REST
 
-JSON, erros em ProblemDetails (RFC 9457), OpenAPI gerado. No modo local não há autenticação (só loopback); no modo remoto, o Cloudflare Access fica na frente.
+JSON, erros em ProblemDetails (RFC 9457), OpenAPI gerado; o cliente Angular é gerado a partir dele. Sem autenticação: o app só escuta em loopback, e as requisições que alteram estado exigem o header `X-Lab-Client` e o `Origin` do próprio app ([09](09-qualidade-seguranca-operacao.md#segurança)).
 
 | Método | Rota | Descrição |
 |---|---|---|

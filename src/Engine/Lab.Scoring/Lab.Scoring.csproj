@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Lab.Ir/Lab.Ir.csproj" />
+    <ProjectReference Include="../Lab.Rules/Lab.Rules.csproj" />
+    <ProjectReference Include="../Lab.Simulation/Lab.Simulation.csproj" />
+    <ProjectReference Include="../Lab.Cost/Lab.Cost.csproj" />
+  </ItemGroup>
+</Project>

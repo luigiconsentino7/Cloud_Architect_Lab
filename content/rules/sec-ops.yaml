@@ -1,0 +1,139 @@
+# Textos curados das regras de segurança, compliance (SEC) e operação (OPS).
+# Perfis de compliance (lgpd, bacen-4893, pci-dss) são didáticos: não substituem uma análise jurídica.
+rules:
+  - id: SEC-001
+    title: Dados acessíveis por rede pública
+    why: >-
+      Banco, cache ou fila com endpoint público ficam a uma credencial vazada de distância de um incidente. Em dados
+      financeiros e pessoais, o impacto é regulatório além de técnico.
+    how: >-
+      Coloque armazenamentos em sub-redes privadas, acesse por endpoints privados e permita só o tráfego dos serviços que
+      precisam deles.
+    tradeoffs: Rede privada exige conectividade para operação e CI (bastion, VPN ou endpoints gerenciados).
+    followUps:
+      - Quem consegue chegar a este banco pela rede, e como você provaria isso numa auditoria?
+    studyTopics: [rede privada, defesa em profundidade]
+    links:
+      - { title: "OWASP API Security Top 10", url: "https://owasp.org/API-Security/" }
+
+  - id: SEC-002
+    title: API de cliente sem autenticação na borda
+    why: >-
+      Uma API pública sem autenticação na borda deixa a validação para cada serviço — e basta um esquecer. Para comandos
+      financeiros, autenticação e autorização por recurso são o mínimo.
+    how: >-
+      Valide tokens (JWT/OAuth 2.0, mTLS para parceiros) no gateway e faça a autorização por recurso no serviço (a conta é
+      mesmo do cliente?).
+    tradeoffs: Validação na borda não substitui a autorização no serviço; as duas são necessárias.
+    followUps:
+      - Como o serviço sabe que a conta debitada pertence a quem fez a requisição?
+    studyTopics: [OAuth 2.0 e JWT, autorização por objeto]
+    links:
+      - { title: "OWASP API Security Top 10", url: "https://owasp.org/API-Security/" }
+
+  - id: SEC-003
+    title: Borda pública sem WAF ou rate limit
+    why: >-
+      Bots, credential stuffing e ataques de camada 7 chegam direto à aplicação e consomem a capacidade que os clientes
+      legítimos precisam no pico.
+    how: >-
+      Coloque um WAF com regras gerenciadas na frente da API e limite requisições por cliente ou parceiro no gateway.
+    tradeoffs: Regras agressivas bloqueiam tráfego legítimo; comece em modo de contagem e ajuste.
+    followUps:
+      - O que impede um parceiro com bug de consumir toda a capacidade da API?
+    studyTopics: [WAF, rate limiting]
+    links:
+      - { title: "AWS WAF — Developer Guide", url: "https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html" }
+      - { title: "Azure Architecture Center — Throttling pattern", url: "https://learn.microsoft.com/azure/architecture/patterns/throttling" }
+
+  - id: SEC-004
+    title: Sem criptografia em repouso com chaves gerenciadas
+    why: >-
+      O desafio exige criptografia em repouso. Sem ela, um snapshot ou disco descartado expõe os dados; sem gestão de
+      chaves, não há rotação nem controle de quem decifra.
+    how: >-
+      Ligue a criptografia em repouso em todos os armazenamentos com chaves num serviço de gestão de chaves (KMS, Key
+      Vault, Cloud KMS) e restrinja quem pode usá-las.
+    tradeoffs: Chaves gerenciadas pelo cliente dão controle, mas exigem rotação e cuidado para não perder acesso.
+    followUps:
+      - Se uma chave for comprometida, como você a revoga sem perder os dados?
+    studyTopics: [criptografia em repouso, gestão de chaves]
+    links:
+      - { title: "AWS KMS — Developer Guide", url: "https://docs.aws.amazon.com/kms/latest/developerguide/overview.html" }
+      - { title: "Azure Key Vault — Overview", url: "https://learn.microsoft.com/azure/key-vault/general/overview" }
+
+  - id: SEC-005
+    title: Dados fora da região exigida
+    why: >-
+      O desafio exige que dados pessoais e financeiros fiquem no Brasil. Um componente em outra região, mesmo como réplica
+      ou cache, leva os dados para fora.
+    how: >-
+      Mantenha todos os componentes com dados na região exigida (inclusive réplicas, backups e logs) e use outra região
+      só para o que não contém dado pessoal.
+    tradeoffs: Ficar numa região só limita a recuperação de desastre regional; planeje-a dentro das regras.
+    followUps:
+      - Onde ficam os backups e os logs deste sistema?
+    studyTopics: [residência de dados, LGPD]
+    links:
+      - { title: "Lei Geral de Proteção de Dados (Lei 13.709/2018)", url: "https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2018/lei/l13709.htm" }
+
+  - id: SEC-006
+    title: Sem trilha de auditoria imutável
+    why: >-
+      Transações financeiras precisam de uma trilha que ninguém consiga alterar, nem um administrador. Sem ela, não dá
+      para provar o que aconteceu numa disputa ou numa auditoria.
+    how: >-
+      Grave cada transação num armazenamento append-only ou WORM (objetos com bloqueio, ledger imutável), fora do caminho
+      síncrono, a partir de eventos confiáveis (outbox).
+    tradeoffs: Dados imutáveis complicam a exclusão por pedido do titular; separe o que é obrigação legal de guarda.
+    followUps:
+      - Como você prova a um auditor que um registro de transação não foi alterado?
+    studyTopics: [trilha de auditoria, armazenamento WORM]
+    links:
+      - { title: "Amazon S3 — Object Lock", url: "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html" }
+      - { title: "Azure Blob Storage — Immutable storage", url: "https://learn.microsoft.com/azure/storage/blobs/immutable-storage-overview" }
+
+  - id: SEC-007
+    title: Segredos fora de um cofre
+    why: >-
+      Senhas e chaves em variáveis de ambiente ou no código vazam em logs, dumps e repositórios, e não têm rotação.
+    how: >-
+      Guarde segredos num cofre (Secrets Manager, Key Vault, Secret Manager), com acesso por identidade do serviço e
+      rotação automática.
+    tradeoffs: O cofre vira dependência na inicialização; use cache local com expiração.
+    followUps:
+      - Como você troca a senha do banco sem reiniciar os serviços?
+    studyTopics: [gestão de segredos, rotação de credenciais]
+    links:
+      - { title: "AWS Secrets Manager — User Guide", url: "https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html" }
+
+  - id: OPS-001
+    title: Caminho crítico sem métricas, logs ou tracing
+    why: >-
+      Sem telemetria no caminho crítico, um incidente vira adivinhação: não dá para saber onde a latência nasce nem quantas
+      transações falharam.
+    how: >-
+      Instrumente cada componente do caminho crítico com métricas (taxa, erros, duração), logs estruturados e tracing
+      distribuído com propagação de contexto, e alarme nos SLOs.
+    tradeoffs: Telemetria tem custo de armazenamento; amostre traces e defina retenção.
+    followUps:
+      - Como você descobriria qual salto ficou lento numa transação específica?
+    studyTopics: [observabilidade, tracing distribuído]
+    links:
+      - { title: "OpenTelemetry — Traces", url: "https://opentelemetry.io/docs/concepts/signals/traces/" }
+      - { title: "Google SRE — Monitoring Distributed Systems", url: "https://sre.google/sre-book/monitoring-distributed-systems/" }
+
+  - id: OPS-002
+    title: Fila sem alarme de backlog
+    why: >-
+      Uma fila acumula em silêncio: quando alguém percebe, o atraso já é de horas e as mensagens podem estar expirando.
+    how: >-
+      Alarme na profundidade da fila e, principalmente, na idade da mensagem mais antiga, com limites ligados ao SLO do
+      processamento assíncrono.
+    tradeoffs: Limites baixos geram alarmes falsos em picos normais; use a idade da mensagem, que é mais estável.
+    followUps:
+      - Quanto tempo uma mensagem pode esperar na fila antes de virar problema para o cliente?
+    studyTopics: [alarmes de fila, SLO de processamento assíncrono]
+    links:
+      - { title: "AWS Builders' Library — Avoiding insurmountable queue backlogs", url: "https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/" }
+      - { title: "Google SRE Workbook — Alerting on SLOs", url: "https://sre.google/workbook/alerting-on-slos/" }

@@ -1,0 +1,291 @@
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+@if (evaluation(); as e) {
+  @if (running()) {
+    <section class="running">
+      <h1>{{ e.kind === 'submission' ? 'Avaliando a submissão' : 'Simulando o rascunho' }}</h1>
+      <div class="progress"><div [style.width]="progress().percent + '%'"></div></div>
+      <p>{{ progress().detail }} · {{ fmt.n(progress().percent) }}%</p>
+      <p class="muted">Compilando o desenho, aplicando as regras, testando os fluxos e simulando carga, falhas e integridade. Leva alguns segundos.</p>
+    </section>
+  } @else if (e.status === 'failed') {
+    <section class="running">
+      <h1>A avaliação falhou</h1>
+      <p class="error">{{ e.error }}</p>
+      <a [routerLink]="['/']">Voltar</a>
+    </section>
+  } @else if (result(); as r) {
+    <section class="head">
+      <div [class]="rankClass(r.score.rank)">{{ r.score.rank }}</div>
+      <div class="score">
+        <h1>Nota {{ r.score.finalScore }}</h1>
+        <p class="muted">
+          {{ e.kind === 'submission' ? 'Submissão avaliada contra todos os cenários' : 'Simulação de rascunho: só os cenários públicos, sem XP' }}
+          · base {{ fmt.n(r.score.baseScore) }}
+        </p>
+        @if (r.score.cap; as cap) {
+          <p class="cap" [class.applied]="cap.applied">Trava de {{ cap.value }}: {{ cap.reason }}</p>
+        }
+      </div>
+      @if (e.kind === 'submission') {
+        <div class="xp">
+          <strong>{{ r.xp.attemptXp }} XP</strong>
+          <small>
+            base {{ r.xp.base }} × nota^1,5 {{ fmt.n(r.xp.scoreFactor) }}
+            @for (m of r.xp.multipliers; track m.name) {
+              × {{ m.name }} {{ fmt.n(m.factor) }}
+            }
+            @if (r.xp.hintFactor < 1) {
+              × dicas {{ fmt.n(r.xp.hintFactor) }}
+            }
+            @if (r.xp.previousBestXp > 0) {
+              · melhor anterior {{ r.xp.previousBestXp }} → creditado {{ r.xp.credited }}
+            }
+          </small>
+        </div>
+      }
+      <div class="links">
+        <a class="button" [routerLink]="['/desafios', e.challengeId]">Voltar ao desenho</a>
+        @if (e.kind === 'submission') {
+          <button type="button" (click)="openReference()">{{ showReference() ? 'Esconder' : 'Ver' }} a referência</button>
+        }
+      </div>
+    </section>
+
+    @if (e.kind === 'submission') {
+      @if (e.narrative; as n) {
+        @if (n.status === 'ready') {
+          <section class="block narrative">
+            <h2>Comentário do mentor <small class="muted">IA local · {{ n.model }}</small></h2>
+            @for (p of n.paragraphs; track $index) {
+              <p>{{ p }}</p>
+            }
+            <p class="muted small">Escrito a partir da revisão abaixo e conferido contra ela: a IA não muda a nota.</p>
+          </section>
+        } @else if (n.status === 'pending') {
+          <section class="block narrative muted">A IA local está escrevendo um comentário sobre esta revisão…</section>
+        } @else {
+          <section class="block narrative muted">
+            {{ n.detail }}
+            @if (aiOn()) {
+              <button type="button" (click)="requestNarrative()" [disabled]="requesting()">Tentar de novo</button>
+            }
+          </section>
+        }
+      } @else if (aiOn()) {
+        <section class="block narrative muted">
+          A IA local está disponível.
+          <button type="button" (click)="requestNarrative()" [disabled]="requesting()">Pedir um comentário sobre esta revisão</button>
+        </section>
+      }
+    }
+
+    @if (showReference() && reference(); as ref) {
+      <section class="block reference">
+        <h2>Solução de referência</h2>
+        <p>{{ ref.rationale }}</p>
+        <p class="muted">Custo estimado da referência: {{ fmt.usd(ref.costUsd) }}/mês</p>
+        @if (ref.scene) {
+          <div class="ref-canvas"><lab-canvas [scene]="ref.scene" [readOnly]="true" /></div>
+        }
+        @if (r.review.reference; as cmp) {
+          <div class="compare">
+            @if (cmp.patternsMissing.length > 0) {
+              <p><strong>Padrões da referência que faltaram:</strong> {{ cmp.patternsMissing.join(', ') }}</p>
+            }
+            @if (cmp.componentsMissing.length > 0) {
+              <p><strong>Componentes que faltaram:</strong> {{ cmp.componentsMissing.join(', ') }}</p>
+            }
+            @if (cmp.patternsShared.length > 0) {
+              <p><strong>Em comum:</strong> {{ cmp.patternsShared.join(', ') }}</p>
+            }
+          </div>
+        }
+      </section>
+    }
+
+    @if (r.review.summary.length > 0) {
+      <section class="block">
+        <h2>O que mais pesou na nota</h2>
+        <ol class="summary">
+          @for (s of r.review.summary; track s.itemId) {
+            <li><span class="impact">−{{ fmt.n(s.impact) }}</span> {{ s.text }}</li>
+          }
+        </ol>
+      </section>
+    }
+
+    <section class="block">
+      <h2>Notas por dimensão</h2>
+      <table class="dims">
+        <tbody>
+          @for (d of r.score.dimensions; track d.dimension) {
+            <tr>
+              <td class="name">{{ dimensionName[d.dimension] }} <small>peso {{ d.weight }}</small></td>
+              <td class="bar"><div [style.width]="barWidth(d.score)" [class.low]="d.score < 60"></div></td>
+              <td class="value">{{ fmt.n(d.score) }}</td>
+              <td class="basis">
+                {{ d.basis }}
+                @for (rule of d.rules; track rule.ruleId) {
+                  <span class="pen">
+                    {{ rule.ruleId }}:
+                    {{ rule.points > 0 ? '−' + fmt.n(rule.points) : 'confirmada na simulação' }}
+                  </span>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </section>
+
+    <section class="block">
+      <h2>Pontos de melhoria</h2>
+      @for (item of r.review.improvements; track item.id) {
+        <article class="improvement sev-{{ item.severity }}">
+          <header (click)="toggle(item.id)">
+            <span class="impact">−{{ fmt.n(item.impact) }}</span>
+            <strong>{{ item.title }}</strong>
+            @if (item.causesCap) {
+              <span class="tag danger">trava</span>
+            }
+            @if (item.confirmed) {
+              <span class="tag">confirmado na simulação</span>
+            }
+            <span class="sev">{{ severityName[item.severity] }} · {{ dimensionName[item.dimension] }}</span>
+          </header>
+          @if (expanded().has(item.id)) {
+            <div class="body">
+              @for (d of item.details; track $index) {
+                <p>{{ d }}</p>
+              }
+              @if (item.evidence.length > 0) {
+                <ul class="evidence">
+                  @for (ev of item.evidence; track $index) {
+                    <li>{{ ev }}</li>
+                  }
+                </ul>
+              }
+              @if (item.why) {
+                <p><strong>Por quê:</strong> {{ item.why }}</p>
+              }
+              @if (item.how) {
+                <p><strong>Como corrigir:</strong> {{ item.how }}</p>
+              }
+              @if (item.tradeoffs) {
+                <p class="muted"><strong>Trade-offs:</strong> {{ item.tradeoffs }}</p>
+              }
+            </div>
+          }
+        </article>
+      } @empty {
+        <p class="ok">Nada a melhorar nos cenários testados. Tente uma dificuldade maior ou uma pegadinha.</p>
+      }
+    </section>
+
+    @if (r.review.strengths.length > 0) {
+      <section class="block">
+        <h2>Pontos fortes</h2>
+        <ul class="strengths">
+          @for (s of r.review.strengths; track $index) {
+            <li><strong>{{ s.title }}</strong> — {{ s.detail }}</li>
+          }
+        </ul>
+      </section>
+    }
+
+    <section class="block">
+      <h2>Cenários e SLOs</h2>
+      @for (group of checksByScenario(); track group.id) {
+        <div class="scenario" [class.fail]="!group.passed">
+          <h3>
+            {{ group.passed ? '✓' : '✗' }} {{ group.name }}
+            @if (group.hidden) {
+              <span class="tag">oculto</span>
+            }
+          </h3>
+          <ul>
+            @for (c of group.checks; track c.id) {
+              <li [class.bad]="c.status !== 'passed'">{{ c.status === 'passed' ? '✓' : '✗' }} {{ c.description }}</li>
+            }
+          </ul>
+        </div>
+      }
+    </section>
+
+    @if (scenarios().length > 0) {
+      <section class="block">
+        <h2>Simulação segundo a segundo</h2>
+        <div class="scenario-tabs">
+          @for (s of scenarios(); track s.scenarioId) {
+            <button type="button" [class.active]="selectedScenario() === s.scenarioId" (click)="selectScenario(s.scenarioId)">{{ s.name || s.scenarioId }}</button>
+          }
+        </div>
+        <div class="charts">
+          @for (chart of charts(); track chart.title) {
+            <lab-chart [title]="chart.title" [series]="chart.series" />
+          }
+        </div>
+        @for (s of scenarios(); track s.scenarioId) {
+          @if (s.scenarioId === selectedScenario() && s.bottlenecks.length > 0) {
+            <ul class="evidence">
+              @for (b of s.bottlenecks; track $index) {
+                <li>{{ b.detail }}</li>
+              }
+            </ul>
+          }
+        }
+      </section>
+    }
+
+    <section class="block">
+      <h2>Custo mensal: {{ fmt.usd(r.cost.monthlyUsd) }} <small class="muted">de {{ fmt.usd(r.cost.budgetUsd) }}</small></h2>
+      <table class="cost">
+        <tbody>
+          @for (line of r.cost.lines; track line.nodeId) {
+            <tr>
+              <td>{{ line.label }}</td>
+              <td class="value">{{ fmt.usd(line.monthlyUsd) }}</td>
+              <td class="muted">{{ line.basis }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+      <ul class="muted small">
+        @for (a of r.cost.assumptions; track $index) {
+          <li>{{ a }}</li>
+        }
+      </ul>
+    </section>
+
+    @if (r.review.followUps.length > 0) {
+      <section class="block">
+        <h2>Perguntas para pensar</h2>
+        <ul>
+          @for (q of r.review.followUps; track $index) {
+            <li>{{ q }}</li>
+          }
+        </ul>
+      </section>
+    }
+
+    @if (r.review.study.length > 0) {
+      <section class="block">
+        <h2>Para estudar</h2>
+        <ul>
+          @for (s of r.review.study; track s.topic) {
+            <li>
+              <strong>{{ s.topic }}</strong>
+              @for (link of s.links; track link.url) {
+                · <a [href]="link.url" target="_blank" rel="noopener noreferrer">{{ link.title }}</a>
+              }
+            </li>
+          }
+        </ul>
+      </section>
+    }
+  }
+} @else {
+  <p class="muted">Carregando…</p>
+}

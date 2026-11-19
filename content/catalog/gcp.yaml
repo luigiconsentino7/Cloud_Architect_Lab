@@ -1,0 +1,78 @@
+# Google Cloud — sobrescritas dos arquétipos. VALORES ILUSTRATIVOS (região southamerica-east1); calibrar com a documentação oficial.
+provider: gcp
+reviewedAt: "2026-11-15"
+components:
+  - { id: gcp.dns, archetype: edge.dns, displayName: "Cloud DNS", isDefault: true, aliases: [cloud dns, dns], docs: "https://cloud.google.com/dns/docs" }
+  - { id: gcp.cdn, archetype: edge.cdn, displayName: "Cloud CDN", isDefault: true, aliases: [cloud cdn, cdn], docs: "https://cloud.google.com/cdn/docs" }
+  - { id: gcp.armor, archetype: edge.waf, displayName: "Google Cloud Armor", shortName: "Cloud Armor", isDefault: true, aliases: [cloud armor, armor, waf, firewall], docs: "https://cloud.google.com/armor/docs" }
+  - { id: gcp.apigateway, archetype: edge.api-gateway, displayName: "API Gateway", shortName: "API Gateway", isDefault: true, aliases: [api gateway, gateway, apigw], docs: "https://cloud.google.com/api-gateway/docs" }
+  - { id: gcp.apigee, archetype: edge.api-gateway, displayName: "Apigee", aliases: [apigee], performance: { latency: { p50: 10, p99: 35 } }, docs: "https://cloud.google.com/apigee/docs" }
+  - { id: gcp.loadbalancing, archetype: network.load-balancer, displayName: "Cloud Load Balancing", shortName: "Load Balancing", isDefault: true, aliases: [cloud load balancing, load balancer, balanceador, glb], docs: "https://cloud.google.com/load-balancing/docs" }
+  - id: gcp.cloudrun
+    archetype: compute.service
+    displayName: "Cloud Run"
+    isDefault: true
+    aliases: [cloud run, cloudrun, container, conteiner, servico, microsservico, microservice, api, backend]
+    performance: { provisioningSeconds: 15 }
+    pricing: { perVcpuHour: 0.0864, perGbHour: 0.009 }
+    docs: "https://cloud.google.com/run/docs"
+  - id: gcp.gke
+    archetype: compute.service
+    displayName: "Google Kubernetes Engine"
+    shortName: GKE
+    aliases: [gke, kubernetes, k8s]
+    performance: { provisioningSeconds: 100 }
+    pricing: { fixedMonthly: 73 }
+    docs: "https://cloud.google.com/kubernetes-engine/docs"
+  - id: gcp.functions
+    archetype: compute.function
+    displayName: "Cloud Run functions"
+    shortName: "Run functions"
+    isDefault: true
+    aliases: [cloud run functions, cloud functions, funcao, function, serverless]
+    performance: { accountConcurrencyLimit: 1000, coldStart: { p50: 500, p99: 2500 } }
+    docs: "https://cloud.google.com/functions/docs"
+  - { id: gcp.dataflow, archetype: compute.stream-processor, displayName: "Dataflow", isDefault: true, aliases: [dataflow, beam, apache beam], docs: "https://cloud.google.com/dataflow/docs" }
+  - { id: gcp.workflows, archetype: workflow.orchestrator, displayName: "Workflows", isDefault: true, aliases: [workflows, saga, workflow, orquestrador], docs: "https://cloud.google.com/workflows/docs" }
+  - id: gcp.cloudsql
+    archetype: data.relational
+    displayName: "Cloud SQL for PostgreSQL"
+    shortName: "Cloud SQL"
+    isDefault: true
+    aliases: [cloud sql, postgres, postgresql, sql, banco relacional, banco de dados, ledger, db]
+    performance: { failoverSeconds: 60 }
+    docs: "https://cloud.google.com/sql/docs/postgres"
+  - { id: gcp.alloydb, archetype: data.relational, displayName: "AlloyDB for PostgreSQL", shortName: AlloyDB, aliases: [alloydb, alloy db], performance: { failoverSeconds: 30 }, docs: "https://cloud.google.com/alloydb/docs" }
+  - { id: gcp.spanner, archetype: data.relational-distributed, displayName: "Spanner", isDefault: true, aliases: [spanner, cloud spanner, sql distribuido], docs: "https://cloud.google.com/spanner/docs" }
+  - id: gcp.bigtable
+    archetype: data.key-value
+    displayName: "Bigtable"
+    isDefault: true
+    aliases: [bigtable, big table, nosql, chave valor]
+    performance: { readsPerSecondPerPartition: 10000, writesPerSecondPerPartition: 10000 }
+    docs: "https://cloud.google.com/bigtable/docs"
+  - id: gcp.firestore
+    archetype: data.document
+    displayName: "Firestore"
+    isDefault: true
+    aliases: [firestore, datastore, documentos]
+    performance: { writesPerSecondPerKey: 1 }
+    docs: "https://cloud.google.com/firestore/docs"
+  - { id: gcp.memorystore, archetype: data.cache, displayName: "Memorystore (Valkey/Redis)", shortName: Memorystore, isDefault: true, aliases: [memorystore, redis, valkey, cache], docs: "https://cloud.google.com/memorystore/docs" }
+  - { id: gcp.gcs, archetype: data.object-storage, displayName: "Cloud Storage", isDefault: true, aliases: [cloud storage, gcs, bucket, objetos], docs: "https://cloud.google.com/storage/docs" }
+  - { id: gcp.pubsub-subscription, archetype: messaging.queue, displayName: "Pub/Sub (assinatura pull)", shortName: "Pub/Sub pull", isDefault: true, aliases: [pub sub pull, assinatura pull, subscription, fila, queue], docs: "https://cloud.google.com/pubsub/docs/pull" }
+  - { id: gcp.cloudtasks, archetype: messaging.queue, displayName: "Cloud Tasks", aliases: [cloud tasks, tasks], performance: { maxMessagesPerSecond: 500 }, docs: "https://cloud.google.com/tasks/docs" }
+  - { id: gcp.pubsub, archetype: messaging.topic, displayName: "Pub/Sub", isDefault: true, aliases: [pub sub, pubsub, topico, topic, eventos], docs: "https://cloud.google.com/pubsub/docs" }
+  - id: gcp.kafka
+    archetype: messaging.stream
+    displayName: "Managed Service for Apache Kafka"
+    shortName: "Managed Kafka"
+    isDefault: true
+    aliases: [managed kafka, kafka, stream]
+    performance: { recordsPerSecondPerPartition: 5000, deliveryLatency: { p50: 20, p99: 120 } }
+    pricing: { perPartitionHour: 0.06 }
+    docs: "https://cloud.google.com/managed-service-for-apache-kafka/docs"
+  - { id: gcp.eventarc, archetype: messaging.event-bus, displayName: "Eventarc", isDefault: true, aliases: [eventarc, barramento de eventos, event bus], docs: "https://cloud.google.com/eventarc/docs" }
+  - { id: gcp.identityplatform, archetype: security.identity, displayName: "Identity Platform", isDefault: true, aliases: [identity platform, firebase auth, identidade, login, oauth], docs: "https://cloud.google.com/identity-platform/docs" }
+  - { id: gcp.secretmanager, archetype: security.secrets, displayName: "Secret Manager + Cloud KMS", shortName: "Secret Manager", isDefault: true, aliases: [secret manager, cloud kms, kms, cofre, segredos, vault], docs: "https://cloud.google.com/secret-manager/docs" }
+  - { id: gcp.monitoring, archetype: observability, displayName: "Cloud Monitoring + Logging + Trace", shortName: "Cloud Monitoring", isDefault: true, aliases: [cloud monitoring, cloud logging, cloud trace, monitoramento, observabilidade], docs: "https://cloud.google.com/monitoring/docs" }

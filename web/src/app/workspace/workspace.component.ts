@@ -1,0 +1,454 @@
+import { ChangeDetectionStrategy, Component, OnDestroy, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
+import { Router, RouterLink } from '@angular/router';
+import { ApiService, problemMessage } from '../core/api.service';
+import { difficultyName, fmt, metricName, modeName, providerName, sloTarget } from '../core/format';
+import { Attempt, Challenge, FlowDefinition, Hint, MappingOption, Palette, PaletteComponent, SceneElement, Validation } from '../core/models';
+import { CanvasComponent } from './canvas.component';
+import { Selection, boundarySkeleton, componentData, componentSkeleton, connectionIdOf, elementsForIrIds, externalSkeleton, freePosition, live, nextComponentId, normalize, selectionOf, typedShape, withCustomData } from './canvas-adapter';
+import { FlowsComponent } from './flows.component';
+import { CustomDataChange, InspectorComponent } from './inspector.component';
+import { ChatComponent } from '../shared/chat.component';
+import { AdjustPanelComponent } from './adjust-panel.component';
+
+type Tab = 'brief' | 'palette' | 'flows' | 'problems' | 'interview';
+type SaveState = 'saved' | 'dirty' | 'saving' | 'conflict' | 'error';
+
+const categoryNames: Record<string, string> = {
+  borda: 'Borda e rede',
+  computacao: 'Computação',
+  dados: 'Dados',
+  mensageria: 'Mensageria',
+  seguranca: 'Segurança',
+  observabilidade: 'Observabilidade',
+  clientes: 'Clientes',
+};
+
+@Component({
+  selector: 'lab-workspace',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [CanvasComponent, FlowsComponent, InspectorComponent, RouterLink, ChatComponent, AdjustPanelComponent],
+  templateUrl: './workspace.component.html',
+  styleUrl: './workspace.component.css',
+})
+export class WorkspaceComponent implements OnDestroy {
+  /** Id do desafio (rota /desafios/:id). */
+  readonly id = input.required<string>();
+
+  private readonly api = inject(ApiService);
+  private readonly router = inject(Router);
+  private readonly canvas = viewChild(CanvasComponent);
+
+  protected readonly fmt = fmt;
+  protected readonly providerName = providerName;
+  protected readonly difficultyName = difficultyName;
+  protected readonly modeName = modeName;
+  protected readonly metricName = metricName;
+  protected readonly sloTarget = sloTarget;
+
+  protected readonly challenge = signal<Challenge | null>(null);
+  protected readonly attempt = signal<Attempt | null>(null);
+  protected readonly palette = signal<Palette | null>(null);
+  protected readonly elements = signal<readonly SceneElement[]>([]);
+  protected readonly selectedIds = signal<string[]>([]);
+  protected readonly flows = signal<FlowDefinition[]>([]);
+  protected readonly validation = signal<Validation | null>(null);
+  protected readonly tab = signal<Tab>('brief');
+  protected readonly saveState = signal<SaveState>('saved');
+  protected readonly busy = signal<string | null>(null);
+  protected readonly message = signal<string | null>(null);
+  protected readonly hints = signal<Hint[]>([]);
+  protected readonly paletteFilter = signal('');
+  protected readonly adjusting = signal(false);
+  protected readonly aiOn = signal(false);
+  protected readonly suggesting = signal(false);
+  /** Sugestões da IA para as anotações, por id do elemento no canvas. */
+  protected readonly aiMappings = signal<Record<string, MappingOption[]>>({});
+  protected readonly annotations = computed(() => this.validation()?.graph.annotations ?? []);
+  protected readonly loadError = signal<string | null>(null);
+
+  protected readonly selection = computed<Selection>(() => selectionOf(this.elements(), this.selectedIds()));
+  protected readonly selectedConnection = computed(() => {
+    const sel = this.selection();
+    return sel?.kind === 'connection' ? connectionIdOf(sel.arrow) : null;
+  });
+  protected readonly editable = computed(() => this.attempt()?.status === 'draft');
+  /** Perguntas curadas do desafio como atalhos no entrevistador. */
+  protected readonly questions = computed(() => (this.challenge()?.clarifications ?? []).map((c) => c.question).slice(0, 6));
+  protected readonly errors = computed(() => this.validation()?.diagnostics.filter((d) => d.severity === 'error').length ?? 0);
+  protected readonly paletteGroups = computed(() => {
+    const filter = normalize(this.paletteFilter().trim());
+    const groups = new Map<string, PaletteComponent[]>();
+    for (const component of this.palette()?.components ?? []) {
+      if (component.archetype === 'external.system') continue;
+      const haystack = normalize(`${component.displayName} ${component.shortName ?? ''} ${component.aliases.join(' ')} ${component.archetype}`);
+      if (filter && !haystack.includes(filter)) continue;
+      const key = component.archetype === 'client' ? 'clientes' : normalize(component.category);
+      groups.set(key, [...(groups.get(key) ?? []), component]);
+    }
+    return [...groups.entries()].map(([key, items]) => ({ key, name: categoryNames[key] ?? key, items }));
+  });
+
+  private saveTimer?: ReturnType<typeof setTimeout>;
+  private liveTimer?: ReturnType<typeof setTimeout>;
+  private validating = false;
+  private revalidate = false;
+  private flowsTimer?: ReturnType<typeof setTimeout>;
+  private pendingScene = false;
+
+  constructor() {
+    // "Outro" e "Ajustar" navegam para outro desafio na mesma rota: a tela recarrega tudo quando o id muda.
+    effect(() => {
+      const id = this.id();
+      untracked(() => void this.open(id));
+    });
+  }
+
+  ngOnDestroy(): void {
+    if (this.pendingScene) void this.saveNow();
+    clearTimeout(this.saveTimer);
+    clearTimeout(this.flowsTimer);
+    clearTimeout(this.liveTimer);
+  }
+
+  protected setTab(tab: Tab): void {
+    this.tab.set(tab);
+  }
+
+  protected onScene(elements: readonly SceneElement[]): void {
+    this.elements.set(elements);
+    if (!this.editable()) return;
+    this.pendingScene = true;
+    this.saveState.set('dirty');
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => void this.saveNow(), 1200);
+  }
+
+  protected onSelection(ids: string[]): void {
+    this.selectedIds.set(ids);
+  }
+
+  protected add(component: PaletteComponent): void {
+    const canvas = this.canvas();
+    if (!canvas || !this.editable()) return;
+    const elements = canvas.elements();
+    const componentId = nextComponentId(elements, component.id);
+    canvas.add([componentSkeleton(component, freePosition(elements, canvas.viewportCenter()), componentId, this.palette()?.catalogVersion ?? '')]);
+  }
+
+  /** Frame de zona (AZ) ou região perto do centro da área visível; o usuário arrasta os componentes para dentro. */
+  protected addBoundary(kind: 'zone' | 'region', value: string): void {
+    const canvas = this.canvas();
+    if (!canvas || !this.editable()) return;
+    const center = canvas.viewportCenter();
+    const size = kind === 'zone' ? { w: 560, h: 400 } : { w: 1240, h: 560 };
+    canvas.add([boundarySkeleton(kind, value, { x: center.x - size.w / 2, y: center.y - size.h / 2 }, Date.now().toString(36))]);
+  }
+
+  protected addExternal(index: number): void {
+    const canvas = this.canvas();
+    const system = this.challenge()?.externalSystems[index];
+    if (!canvas || !system || !this.editable()) return;
+    canvas.add([externalSkeleton(system, freePosition(canvas.elements(), canvas.viewportCenter()), this.palette()?.catalogVersion ?? '')]);
+  }
+
+  protected onCustomData(change: CustomDataChange): void {
+    if (!this.editable()) return;
+    this.canvas()?.replace([withCustomData(change.element, change.customData)]);
+  }
+
+  protected onFlows(flows: FlowDefinition[]): void {
+    this.flows.set(flows);
+    const attempt = this.attempt();
+    if (!attempt || !this.editable()) return;
+    clearTimeout(this.flowsTimer);
+    this.flowsTimer = setTimeout(
+      () =>
+        void this.api
+          .saveFlows(attempt.id, flows)
+          .then(() => this.scheduleLiveValidation())
+          .catch((e) => this.message.set(problemMessage(e))),
+      400,
+    );
+  }
+
+  protected highlight(irIds: string[], elementIds: string[] = []): void {
+    const ids = [...elementIds, ...elementsForIrIds(this.canvas()?.elements() ?? [], irIds)];
+    if (ids.length > 0) this.canvas()?.select(ids);
+  }
+
+  protected highlightPair(nodeIds: string[], edgeIds: string[]): void {
+    this.highlight([...nodeIds, ...edgeIds]);
+  }
+
+  protected scenarioNames(challenge: Challenge): string {
+    return challenge.scenarios.map((s) => s.name || s.id).join(', ');
+  }
+
+  protected async validate(): Promise<void> {
+    const attempt = this.attempt();
+    if (!attempt) return;
+    await this.run('Validando…', async () => {
+      await this.flushAll();
+      this.validation.set(await this.api.validate(attempt.id));
+      this.tab.set('problems');
+    });
+  }
+
+  protected async simulate(): Promise<void> {
+    const attempt = this.attempt();
+    if (!attempt) return;
+    await this.run('Enviando para simulação…', async () => {
+      await this.flushAll();
+      const ticket = await this.api.simulate(attempt.id);
+      await this.router.navigate(['/avaliacoes', ticket.evaluationId]);
+    });
+  }
+
+  protected async submit(): Promise<void> {
+    const attempt = this.attempt();
+    if (!attempt) return;
+    if (!confirm('Submeter a tentativa? O desenho fica congelado e roda contra todos os cenários, inclusive os ocultos.')) return;
+    await this.run('Submetendo…', async () => {
+      await this.flushAll();
+      const key = idempotencyKey(attempt.id);
+      const ticket = await this.api.submit(attempt.id, key);
+      await this.router.navigate(['/avaliacoes', ticket.evaluationId]);
+    });
+  }
+
+  protected async hint(): Promise<void> {
+    const attempt = this.attempt();
+    if (!attempt) return;
+    if (!confirm('Abrir a próxima dica? Cada dica reduz o XP desta tentativa (10%, 20% e 35%).')) return;
+    await this.run('Buscando a dica…', async () => {
+      const hint = await this.api.hint(attempt.id);
+      this.hints.update((list) => [...list, hint]);
+      this.attempt.set({ ...attempt, hintLevelsUsed: hint.hintLevelsUsed });
+      this.tab.set('brief');
+    });
+  }
+
+  /** Tipa a forma desenhada à mão como o componente escolhido e abre o inspector nela. */
+  protected mapShape(elementId: string, catalogId: string): void {
+    const canvas = this.canvas();
+    const palette = this.palette();
+    if (!canvas || !palette || !this.editable()) return;
+    const elements = canvas.elements();
+    const shape = elements.find((e) => e.id === elementId && !e.isDeleted);
+    const component = palette.components.find((c) => c.id === catalogId);
+    if (!shape || !component) return;
+    canvas.replace([typedShape(shape, component, nextComponentId(elements, catalogId), palette.catalogVersion)]);
+    this.aiMappings.update(({ [elementId]: _, ...rest }) => rest);
+    canvas.select([elementId]);
+  }
+
+  /** Pede à IA local um componente para cada anotação (salva antes: o servidor lê o rascunho salvo). */
+  protected async suggestWithAi(): Promise<void> {
+    const attempt = this.attempt();
+    if (!attempt) return;
+    this.suggesting.set(true);
+    try {
+      if (this.pendingScene) await this.saveNow();
+      const mappings = await this.api.labelMappings(attempt.id);
+      this.aiMappings.set(Object.fromEntries(mappings.filter((m) => m.kind === 'anotacao').map((m) => [m.elementId, m.options])));
+    } catch (error) {
+      this.message.set(problemMessage(error));
+    } finally {
+      this.suggesting.set(false);
+    }
+  }
+
+  /** "Outro": mesma semente, nuvem, nível e pegadinhas, com números novos. */
+  protected async another(): Promise<void> {
+    const challenge = this.challenge();
+    if (!challenge) return;
+    this.busy.set('Montando outro desafio…');
+    try {
+      const other = await this.api.anotherVariation(challenge.id);
+      await this.openChallenge(other.id);
+    } catch (error) {
+      this.message.set(problemMessage(error));
+    } finally {
+      this.busy.set(null);
+    }
+  }
+
+  protected async openChallenge(id: string): Promise<void> {
+    this.adjusting.set(false);
+    await this.router.navigate(['/desafios', id]);
+  }
+
+  protected async newAttempt(): Promise<void> {
+    const challenge = this.challenge();
+    if (!challenge) return;
+    await this.run('Abrindo nova tentativa…', async () => {
+      // A nova tentativa começa com o desenho e os fluxos da anterior; o canvas é recriado para ela (editável).
+      const attempt = await this.api.startAttempt(challenge.id);
+      this.attempt.set(attempt);
+      this.flows.set(attempt.flows);
+      this.validation.set(null);
+      this.hints.set([]);
+      if (attempt.scene.elements.length > 0) this.scheduleLiveValidation(300);
+    });
+  }
+
+  protected async keepMine(): Promise<void> {
+    const attempt = this.attempt();
+    if (!attempt) return;
+    const fresh = await this.api.attempt(attempt.id);
+    this.attempt.set({ ...attempt, draftVersion: fresh.draftVersion });
+    await this.saveNow();
+  }
+
+  protected reloadTheirs(): void {
+    location.reload();
+  }
+
+  private async open(id: string): Promise<void> {
+    if (this.pendingScene) await this.saveNow();
+    clearTimeout(this.saveTimer);
+    clearTimeout(this.flowsTimer);
+    clearTimeout(this.liveTimer);
+    if (this.challenge() && this.challenge()!.id !== id) {
+      // Limpa a tela do desafio anterior: o canvas é recriado com o desenho do novo.
+      this.challenge.set(null);
+      this.attempt.set(null);
+      this.validation.set(null);
+      this.hints.set([]);
+      this.flows.set([]);
+      this.elements.set([]);
+      this.selectedIds.set([]);
+      this.aiMappings.set({});
+      this.message.set(null);
+      this.loadError.set(null);
+      this.tab.set('brief');
+      this.saveState.set('saved');
+    }
+    await this.load();
+  }
+
+  private async load(): Promise<void> {
+    void this.api.aiStatus().then((status) => this.aiOn.set(status.mode === 'ollama')).catch(() => undefined);
+    try {
+      const challenge = await this.api.challenge(this.id());
+      this.challenge.set(challenge);
+      const [palette, attempts] = await Promise.all([this.api.palette(challenge.provider), this.api.attempts(challenge.id)]);
+      this.palette.set(palette);
+      const latest = attempts.at(-1);
+      const attempt = latest ?? (await this.api.startAttempt(challenge.id));
+      this.flows.set(attempt.flows);
+      if (attempt.scene.elements.length === 0 && attempt.status === 'draft') {
+        attempt.scene = { ...attempt.scene, elements: [] };
+        this.attempt.set(attempt);
+        queueMicrotask(() => this.placeStarters(challenge, palette));
+      } else {
+        this.attempt.set(attempt);
+        if (attempt.status === 'draft' && attempt.scene.elements.length > 0) this.scheduleLiveValidation(300);
+      }
+    } catch (error) {
+      this.loadError.set(problemMessage(error));
+    }
+  }
+
+  /** Canvas vazio: já coloca os clientes de entrada e os sistemas externos do desafio (com os ids certos). */
+  private placeStarters(challenge: Challenge, palette: Palette): void {
+    const canvas = this.canvas();
+    if (!canvas) {
+      setTimeout(() => this.placeStarters(challenge, palette), 200);
+      return;
+    }
+    if (live(canvas.elements()).some((e) => componentData(e))) return;
+    const skeletons: Record<string, unknown>[] = [];
+    const clients = [...new Set(challenge.useCases.map((u) => u.entryClient))];
+    clients.forEach((clientId, i) => {
+      const client = palette.components.find((c) => c.id === clientId);
+      if (client) skeletons.push(componentSkeleton(client, { x: 60, y: 80 + i * 140 }, nextComponentId([], clientId), palette.catalogVersion));
+    });
+    challenge.externalSystems.forEach((system, i) => skeletons.push(externalSkeleton(system, { x: 900, y: 80 + i * 140 }, palette.catalogVersion)));
+    if (skeletons.length > 0) canvas.add(skeletons, { select: false, fit: true });
+  }
+
+  private async flushAll(): Promise<void> {
+    clearTimeout(this.saveTimer);
+    if (this.pendingScene) await this.saveNow();
+    const attempt = this.attempt();
+    if (attempt) {
+      clearTimeout(this.flowsTimer);
+      await this.api.saveFlows(attempt.id, this.flows());
+    }
+  }
+
+  private async saveNow(): Promise<void> {
+    const attempt = this.attempt();
+    const canvas = this.canvas();
+    if (!attempt || !canvas || !this.editable()) return;
+    this.saveState.set('saving');
+    this.pendingScene = false;
+    try {
+      const result = await this.api.saveDraft(attempt.id, canvas.snapshot(), attempt.draftVersion);
+      this.attempt.set({ ...attempt, draftVersion: result.draftVersion });
+      this.saveState.set(this.pendingScene ? 'dirty' : 'saved');
+      this.scheduleLiveValidation();
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      this.saveState.set(status === 412 ? 'conflict' : 'error');
+      this.pendingScene = true;
+      if (status !== 412) this.message.set(problemMessage(error));
+    }
+  }
+
+  /** Validação ao vivo: depois de salvar o desenho ou os fluxos, valida em segundo plano, sem trocar de aba. */
+  private scheduleLiveValidation(delay = 600): void {
+    if (!this.editable()) return;
+    clearTimeout(this.liveTimer);
+    this.liveTimer = setTimeout(() => void this.liveValidate(), delay);
+  }
+
+  private async liveValidate(): Promise<void> {
+    const attempt = this.attempt();
+    if (!attempt || !this.editable()) return;
+    if (this.validating) {
+      this.revalidate = true;
+      return;
+    }
+    this.validating = true;
+    try {
+      const result = await this.api.validate(attempt.id);
+      if (this.attempt()?.id === attempt.id) this.validation.set(result);
+    } catch {
+      // silencioso: o botão Validar mostra o erro com detalhes
+    } finally {
+      this.validating = false;
+      if (this.revalidate) {
+        this.revalidate = false;
+        this.scheduleLiveValidation(0);
+      }
+    }
+  }
+
+  private async run(label: string, action: () => Promise<void>): Promise<void> {
+    this.busy.set(label);
+    this.message.set(null);
+    try {
+      await action();
+    } catch (error) {
+      this.message.set(problemMessage(error));
+    } finally {
+      this.busy.set(null);
+    }
+  }
+}
+
+/** Mesma chave para a mesma tentativa enquanto a aba existir: reenviar não cria outra avaliação. */
+function idempotencyKey(attemptId: string): string {
+  const storageKey = `lab:submit:${attemptId}`;
+  try {
+    const existing = sessionStorage.getItem(storageKey);
+    if (existing) return existing;
+    const key = crypto.randomUUID();
+    sessionStorage.setItem(storageKey, key);
+    return key;
+  } catch {
+    return `${attemptId}-submit`;
+  }
+}

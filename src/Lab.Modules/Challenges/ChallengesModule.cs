@@ -1,0 +1,437 @@
+using System.Globalization;
+using System.Text;
+using Lab.Ai;
+using Lab.Content;
+using Lab.Ir;
+using Lab.Ir.Challenges;
+using Lab.Ir.Seeds;
+using Lab.Modules.Challenges.Contracts;
+using Lab.Modules.Profile.Contracts;
+using Lab.Modules.Shared;
+using Lab.Modules.Shared.Persistence;
+using Lab.Pipeline.Seeds;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.EntityFrameworkCore;
+
+namespace Lab.Modules.Challenges;
+
+public sealed record TwistInfo(string Id, string Title, string Description, Difficulty MinDifficulty);
+
+public sealed record LibraryItem(
+    string SeedId,
+    string Title,
+    string Summary,
+    string Track,
+    string Domain,
+    IReadOnlyList<string> Tags,
+    IReadOnlyList<Difficulty> Difficulties,
+    IReadOnlyList<TwistInfo> Twists,
+    IReadOnlyList<string> MatchedTerms,
+    double Score);
+
+/// <summary>Parte pública do desafio: sem cenários ocultos, sem referência e sem o texto das dicas.</summary>
+public sealed record ChallengePublicView
+{
+    public required Guid Id { get; init; }
+    public required string SeedId { get; init; }
+    public int SeedVersion { get; init; }
+    public required string Title { get; init; }
+    public string Summary { get; init; } = "";
+    public string Narrative { get; init; } = "";
+    public string Track { get; init; } = "";
+    public string Domain { get; init; } = "";
+    public IReadOnlyList<string> Tags { get; init; } = [];
+    public Difficulty Difficulty { get; init; }
+    public CloudProvider Provider { get; init; }
+    public GameMode Mode { get; init; }
+    public string Region { get; init; } = "";
+    public IReadOnlyList<UseCaseSpec> UseCases { get; init; } = [];
+    public IReadOnlyList<ExternalSystemSpec> ExternalSystems { get; init; } = [];
+    public WorkloadSpec Workload { get; init; } = new();
+    public IReadOnlyList<ScenarioSpec> Scenarios { get; init; } = [];
+    public IReadOnlyList<SloSpec> Slos { get; init; } = [];
+    public int HiddenScenarios { get; init; }
+    public ConstraintsSpec Constraints { get; init; } = new();
+    public IReadOnlyList<string> Competencies { get; init; } = [];
+    public RubricWeights Weights { get; init; } = new();
+    public int HintCount { get; init; }
+    public IReadOnlyList<ClarificationSpec> Clarifications { get; init; } = [];
+    public IReadOnlyDictionary<string, double> Variables { get; init; } = new Dictionary<string, double>();
+    public string Status { get; init; } = ChallengeStatus.Ready;
+    public DateTime CreatedAt { get; init; }
+
+    /// <summary>Modelo de IA local que personalizou o enunciado (nulo quando veio direto da biblioteca).</summary>
+    public string? PersonalizedBy { get; init; }
+
+    public string? PersonalizationNote { get; init; }
+
+    public static ChallengePublicView From(Guid id, ChallengeSpec spec, string status, DateTime createdAt)
+    {
+        var publicScenarios = spec.TestPlan.Scenarios.Where(s => s.Visibility == Visibility.Public).ToList();
+        var publicIds = publicScenarios.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        return new ChallengePublicView
+        {
+            Id = id,
+            SeedId = spec.SeedId,
+            SeedVersion = spec.SeedVersion,
+            Title = spec.Title,
+            Summary = spec.Summary,
+            Narrative = spec.Narrative,
+            Track = spec.Track,
+            Domain = spec.Domain,
+            Tags = spec.Tags,
+            Difficulty = spec.Difficulty,
+            Provider = spec.Provider,
+            Mode = spec.Mode,
+            Region = spec.Region,
+            UseCases = spec.UseCases,
+            ExternalSystems = spec.ExternalSystems,
+            Workload = spec.Workload,
+            Scenarios = publicScenarios,
+            Slos = spec.TestPlan.Slos
+                .Select(s => s with { Scenarios = s.Scenarios.Where(publicIds.Contains).ToList() })
+                .Where(s => s.Scenarios.Count > 0)
+                .ToList(),
+            HiddenScenarios = spec.TestPlan.Scenarios.Count - publicScenarios.Count,
+            Constraints = spec.Constraints,
+            Competencies = spec.Competencies,
+            Weights = spec.Weights,
+            HintCount = spec.Hints.Count,
+            Clarifications = spec.Clarifications,
+            Variables = spec.Variables,
+            Status = status,
+            CreatedAt = createdAt,
+        };
+    }
+}
+
+/// <summary>Busca guiada na biblioteca (a lógica fica em <see cref="SeedSearch"/>, compartilhada com os evals).</summary>
+public static class LibrarySearch
+{
+    public static IReadOnlyList<LibraryItem> Search(IEnumerable<Seed> seeds, string? query, Difficulty? difficulty, string? track) =>
+        SeedSearch.Rank(seeds, query, difficulty, track)
+            .Select(m => new LibraryItem(m.Seed.Id, m.Seed.Title, m.Seed.Summary, m.Seed.Track, m.Seed.Domain, m.Seed.Tags, m.Seed.Difficulties,
+                m.Seed.Twists.Select(t => new TwistInfo(t.Id, t.Title, t.Description, t.MinDifficulty)).ToList(), m.MatchedTerms, m.Score))
+            .ToList();
+
+    public static string Normalize(string text) => SeedSearch.Normalize(text);
+}
+
+public sealed record CreateChallengeRequest(
+    string SeedId,
+    string Provider,
+    string? Difficulty,
+    string? Mode,
+    IReadOnlyList<string>? Twists,
+    IReadOnlyDictionary<string, double>? Variables,
+    bool RandomVariation = true);
+
+/// <summary>"Outro" (corpo vazio) ou "Ajustar": nuvem, dificuldade, modo, pegadinhas, variáveis ou uma instrução para a IA local.</summary>
+public sealed record VariationRequest(
+    string? Provider = null,
+    string? Difficulty = null,
+    string? Mode = null,
+    IReadOnlyList<string>? Twists = null,
+    IReadOnlyDictionary<string, double>? Variables = null,
+    string? Instruction = null);
+
+public sealed record VariableOption(string Description, double Step, IReadOnlyDictionary<string, double[]> Ranges);
+
+/// <summary>O que dá para ajustar num desafio: as faixas e pegadinhas da semente e os valores atuais.</summary>
+public sealed record ChallengeOptions(
+    Guid ChallengeId,
+    string SeedId,
+    CloudProvider Provider,
+    Difficulty Difficulty,
+    GameMode Mode,
+    IReadOnlyList<Difficulty> Difficulties,
+    IReadOnlyList<TwistInfo> Twists,
+    IReadOnlyDictionary<string, VariableOption> Variables,
+    IReadOnlyDictionary<string, double> CurrentVariables,
+    IReadOnlyList<string> CurrentTwists,
+    bool AiAvailable);
+
+public sealed class AiUnavailableException(string message) : Exception(message);
+
+public sealed record ChallengeSummary(Guid Id, string SeedId, string Title, string Track, CloudProvider Provider, Difficulty Difficulty, GameMode Mode, DateTime CreatedAt);
+
+public sealed class ChallengeService(
+    LabDbContext db,
+    LabContent content,
+    IProfileQueries profiles,
+    AiRuntime ai,
+    IChallengePersonalizer personalizer,
+    TimeProvider clock) : IChallengeQueries, IChallengeLibrary
+{
+    public async Task<ChallengeOptions?> OptionsAsync(Guid challengeId, CancellationToken cancellationToken)
+    {
+        var current = await db.Challenges.AsNoTracking().FirstOrDefaultAsync(c => c.Id == challengeId, cancellationToken);
+        if (current is null || content.FindSeed(current.SeedId) is not { } seed) return null;
+        var spec = Json.Deserialize<ChallengeSpec>(current.SpecJson);
+        var aiAvailable = (await ai.StatusAsync(cancellationToken)).Mode == AiMode.Ollama;
+        return new ChallengeOptions(
+            challengeId,
+            seed.Id,
+            spec.Provider,
+            spec.Difficulty,
+            spec.Mode,
+            seed.Difficulties.Count > 0 ? seed.Difficulties : Enum.GetValues<Difficulty>(),
+            seed.Twists.Select(t => new TwistInfo(t.Id, t.Title, t.Description, t.MinDifficulty)).ToList(),
+            seed.Variables.ToDictionary(
+                v => v.Key,
+                v => new VariableOption(v.Value.Description, v.Value.Step, v.Value.Ranges.ToDictionary(r => r.Key.ToString().ToLowerInvariant(), r => r.Value)),
+                StringComparer.Ordinal),
+            spec.Variables,
+            spec.Twists,
+            aiAvailable);
+    }
+
+    /// <summary>
+    /// Nova variação da mesma semente. Sem nada no pedido é o "Outro" (mesma nuvem, nível, modo e pegadinhas, números
+    /// novos); com campos é o "Ajustar"; com instrução, a IA local devolve o delta. A personalização anterior é mantida.
+    /// </summary>
+    public async Task<ChallengeEntity> VaryAsync(Guid challengeId, VariationRequest request, CancellationToken cancellationToken)
+    {
+        var current = await db.Challenges.AsNoTracking().FirstOrDefaultAsync(c => c.Id == challengeId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Desafio {challengeId} não existe.");
+        var seed = content.FindSeed(current.SeedId) ?? throw new SeedException($"Semente '{current.SeedId}' não existe mais.");
+        var spec = Json.Deserialize<ChallengeSpec>(current.SpecJson);
+        var provider = request.Provider ?? current.Provider;
+        var level = Lab.Content.SeedLoader.ParseDifficulty(request.Difficulty ?? current.Difficulty);
+        var levelName = level.ToString().ToLowerInvariant();
+        var mode = request.Mode ?? current.Mode;
+        var previous = current.PersonalizationJson is null ? null : Json.Deserialize<StoredPersonalization>(current.PersonalizationJson);
+
+        ChallengeOrder order;
+        if (!string.IsNullOrWhiteSpace(request.Instruction))
+        {
+            if ((await ai.StatusAsync(cancellationToken)).Mode != AiMode.Ollama)
+                throw new AiUnavailableException("A IA local não está disponível: ajuste pelos controles ou abra o Ollama.");
+            var instruction = AiText.Clean(request.Instruction, ChallengePersonalizer.MaxContextLength / 2);
+            var context = string.IsNullOrWhiteSpace(previous?.Context) ? instruction : $"{previous.Context}\nAjuste pedido: {instruction}";
+            var result = await personalizer.PersonalizeAsync(new PersonalizationRequest(context, levelName, [SeedCandidate.From(seed, level)]), cancellationToken)
+                ?? throw new SeedException("A IA local não conseguiu ajustar o desafio com essa instrução. Tente de novo com outras palavras ou use os controles.");
+            order = ChallengeOrders.Personalized(result, context, provider, levelName, mode);
+        }
+        else
+        {
+            // Pegadinhas que não valem no nível novo caem sozinhas; as pedidas explicitamente são validadas pelo instanciador.
+            var twists = request.Twists ?? spec.Twists.Where(id => seed.Twists.FirstOrDefault(t => t.Id == id)?.MinDifficulty <= level).ToList();
+            order = new ChallengeOrder(seed.Id, provider, levelName, mode)
+            {
+                Twists = twists,
+                Variables = request.Variables,
+                Narrative = previous?.Delta?.Narrative,
+                ExtraClarifications = previous?.Delta?.ClarificationsExtra
+                    .Select(c => new ClarificationSpec { Question = c.Question, Answer = c.Answer, Keywords = ChallengeOrders.Keywords(c.Question) })
+                    .ToList() ?? [],
+                PersonalizedBy = previous?.Model,
+                PersonalizationNote = previous?.Delta?.Reason,
+                PersonalizationJson = current.PersonalizationJson,
+            };
+        }
+
+        return await CreateEntityAsync(order, Random.Shared.NextInt64(1, long.MaxValue), cancellationToken);
+    }
+
+    public Task<ChallengeEntity> CreateAsync(CreateChallengeRequest request, CancellationToken cancellationToken) =>
+        CreateEntityAsync(
+            new ChallengeOrder(request.SeedId, request.Provider, request.Difficulty, request.Mode) { Variables = request.Variables, Twists = request.Twists ?? [] },
+            request.RandomVariation && request.Variables is null ? Random.Shared.NextInt64(1, long.MaxValue) : null,
+            cancellationToken);
+
+    /// <summary>Pedido de outro módulo (ex.: o chat): as variáveis que o delta não fixou são sorteadas na faixa.</summary>
+    async Task<ChallengeInfo> IChallengeLibrary.CreateAsync(ChallengeOrder order, CancellationToken cancellationToken)
+    {
+        var c = await CreateEntityAsync(order, Random.Shared.NextInt64(1, long.MaxValue), cancellationToken);
+        return new ChallengeInfo(c.Id, c.ProfileId, c.SeedId, c.SeedVersion, c.Title, c.Provider, c.Difficulty, c.Mode);
+    }
+
+    public IReadOnlyList<SeedSuggestion> Search(string? query, Difficulty? difficulty, int limit) =>
+        LibrarySearch.Search(content.Seeds, query, difficulty, null).Take(limit)
+            .Select(i => new SeedSuggestion(i.SeedId, i.Title, i.Summary, i.Track, i.Tags, i.MatchedTerms))
+            .ToList();
+
+    public async Task<ChallengeBrief?> BriefAsync(Guid challengeId, CancellationToken cancellationToken = default)
+    {
+        var json = await db.Challenges.Where(c => c.Id == challengeId).Select(c => c.SpecJson).FirstOrDefaultAsync(cancellationToken);
+        if (json is null) return null;
+        var spec = Json.Deserialize<ChallengeSpec>(json);
+        return new ChallengeBrief(challengeId, spec.Title, ChallengeStatement.Write(spec), spec.Clarifications);
+    }
+
+    private async Task<ChallengeEntity> CreateEntityAsync(ChallengeOrder order, long? variationSeed, CancellationToken cancellationToken)
+    {
+        var seed = content.FindSeed(order.SeedId) ?? throw new SeedException($"Semente '{order.SeedId}' não existe.");
+        var difficulty = order.Difficulty is { } d ? Lab.Content.SeedLoader.ParseDifficulty(d)
+            : seed.Difficulties.Contains(Difficulty.Senior) ? Difficulty.Senior : seed.Difficulties.FirstOrDefault(Difficulty.Senior);
+        var mode = order.Mode is { } m && Enum.TryParse<GameMode>(m, ignoreCase: true, out var parsed) ? parsed : GameMode.Treino;
+        CloudProvider provider;
+        try
+        {
+            provider = CloudProviders.Parse(order.Provider);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new SeedException(ex.Message);
+        }
+
+        var id = Guid.CreateVersion7();
+        var instance = SeedInstantiator.Instantiate(new InstantiationRequest
+        {
+            Seed = seed,
+            Provider = provider,
+            Difficulty = difficulty,
+            Mode = mode,
+            Twists = order.Twists,
+            Variables = order.Variables,
+            VariationSeed = variationSeed,
+            ChallengeId = $"chl_{id:N}",
+        }, content.Catalog);
+
+        var now = clock.GetUtcNow().UtcDateTime;
+        var spec = Personalize(instance.Challenge, order);
+        var view = ChallengePublicView.From(id, spec, ChallengeStatus.Ready, now) with
+        {
+            PersonalizedBy = order.PersonalizedBy,
+            PersonalizationNote = order.PersonalizationNote,
+        };
+        var entity = new ChallengeEntity
+        {
+            Id = id,
+            ProfileId = await profiles.CurrentProfileIdAsync(cancellationToken),
+            SeedId = seed.Id,
+            SeedVersion = seed.Version,
+            Title = spec.Title,
+            Provider = provider.Code(),
+            Difficulty = difficulty.ToString().ToLowerInvariant(),
+            Mode = mode.ToString().ToLowerInvariant(),
+            VariationJson = Json.Serialize(new { variables = spec.Variables, twists = spec.Twists }),
+            PersonalizationJson = order.PersonalizationJson,
+            SpecJson = Json.Serialize(spec),
+            PublicJson = Json.Serialize(view),
+            MasterSeed = spec.MasterSeed,
+            ReferenceSceneJson = instance.ReferenceScene is null ? null : Json.Serialize(new { scene = instance.ReferenceScene, flows = instance.ReferenceFlows }),
+            Status = ChallengeStatus.Ready,
+            CreatedAt = now,
+        };
+        db.Challenges.Add(entity);
+        await db.SaveChangesAsync(cancellationToken);
+        return entity;
+    }
+
+    /// <summary>A narrativa da IA entra antes do enunciado curado (que mantém os números); os esclarecimentos extras, no fim.</summary>
+    private static ChallengeSpec Personalize(ChallengeSpec spec, ChallengeOrder order)
+    {
+        if (string.IsNullOrWhiteSpace(order.Narrative) && order.ExtraClarifications.Count == 0) return spec;
+        return spec with
+        {
+            Narrative = string.IsNullOrWhiteSpace(order.Narrative) ? spec.Narrative : $"{order.Narrative.Trim()}\n\n{spec.Narrative}",
+            Clarifications = [.. spec.Clarifications, .. order.ExtraClarifications],
+        };
+    }
+
+    public async Task<ChallengeInfo?> FindAsync(Guid challengeId, CancellationToken cancellationToken = default) =>
+        await db.Challenges.Where(c => c.Id == challengeId)
+            .Select(c => new ChallengeInfo(c.Id, c.ProfileId, c.SeedId, c.SeedVersion, c.Title, c.Provider, c.Difficulty, c.Mode))
+            .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<ChallengeSpec?> SpecAsync(Guid challengeId, CancellationToken cancellationToken = default)
+    {
+        var json = await db.Challenges.Where(c => c.Id == challengeId).Select(c => c.SpecJson).FirstOrDefaultAsync(cancellationToken);
+        return json is null ? null : Json.Deserialize<ChallengeSpec>(json);
+    }
+
+    public async Task<string?> ReferenceSceneAsync(Guid challengeId, CancellationToken cancellationToken = default) =>
+        await db.Challenges.Where(c => c.Id == challengeId).Select(c => c.ReferenceSceneJson).FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<double?> ReferenceCostAsync(Guid challengeId, CancellationToken cancellationToken = default) =>
+        await db.Challenges.Where(c => c.Id == challengeId).Select(c => c.ReferenceCostUsd).FirstOrDefaultAsync(cancellationToken);
+
+    public async Task SaveReferenceCostAsync(Guid challengeId, double cost, CancellationToken cancellationToken = default)
+    {
+        var challenge = await db.Challenges.FirstAsync(c => c.Id == challengeId, cancellationToken);
+        challenge.ReferenceCostUsd = cost;
+        await db.SaveChangesAsync(cancellationToken);
+    }
+}
+
+public static class ChallengeEndpoints
+{
+    public static void MapChallenges(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("/api/library", (string? q, string? difficulty, string? track, LabContent content) =>
+        {
+            Difficulty? level = null;
+            if (!string.IsNullOrWhiteSpace(difficulty))
+            {
+                try
+                {
+                    level = Lab.Content.SeedLoader.ParseDifficulty(difficulty);
+                }
+                catch (Lab.Content.ContentException ex)
+                {
+                    return Results.ValidationProblem(new Dictionary<string, string[]> { ["difficulty"] = [ex.Message] });
+                }
+            }
+
+            return Results.Ok(LibrarySearch.Search(content.Seeds, q, level, track));
+        }).WithTags("Desafios");
+
+        var group = app.MapGroup("/api/challenges").WithTags("Desafios");
+
+        group.MapPost("", async (CreateChallengeRequest request, ChallengeService challenges, CancellationToken ct) =>
+        {
+            try
+            {
+                var entity = await challenges.CreateAsync(request, ct);
+                return Results.Created($"/api/challenges/{entity.Id}", Json.Deserialize<ChallengePublicView>(entity.PublicJson));
+            }
+            catch (SeedException ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest, title: "Não foi possível montar o desafio");
+            }
+        });
+
+        group.MapGet("", async (LabDbContext db, int? limit, CancellationToken ct) =>
+        {
+            var rows = await db.Challenges.OrderByDescending(c => c.CreatedAt).Take(Math.Clamp(limit ?? 20, 1, 100))
+                .Select(c => c.PublicJson).ToListAsync(ct);
+            return Results.Ok(rows.Select(Json.Deserialize<ChallengePublicView>)
+                .Select(c => new ChallengeSummary(c.Id, c.SeedId, c.Title, c.Track, c.Provider, c.Difficulty, c.Mode, c.CreatedAt)));
+        });
+
+        group.MapGet("/{id:guid}", async (Guid id, LabDbContext db, CancellationToken ct) =>
+        {
+            var json = await db.Challenges.Where(c => c.Id == id).Select(c => c.PublicJson).FirstOrDefaultAsync(ct);
+            return json is null ? Results.NotFound() : Results.Ok(Json.Deserialize<ChallengePublicView>(json));
+        });
+
+        group.MapGet("/{id:guid}/options", async (Guid id, ChallengeService challenges, CancellationToken ct) =>
+            await challenges.OptionsAsync(id, ct) is { } options ? Results.Ok(options) : Results.NotFound());
+
+        // "Outro" (corpo vazio) e "Ajustar" (nuvem, nível, modo, pegadinhas, variáveis ou instrução para a IA).
+        group.MapPost("/{id:guid}/variations", async (Guid id, VariationRequest? request, ChallengeService challenges, CancellationToken ct) =>
+        {
+            try
+            {
+                var entity = await challenges.VaryAsync(id, request ?? new VariationRequest(), ct);
+                return Results.Created($"/api/challenges/{entity.Id}", Json.Deserialize<ChallengePublicView>(entity.PublicJson));
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (AiUnavailableException ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status409Conflict, title: "IA local indisponível");
+            }
+            catch (Exception ex) when (ex is SeedException or Lab.Content.ContentException)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest, title: "Não foi possível montar o desafio");
+            }
+        });
+    }
+}

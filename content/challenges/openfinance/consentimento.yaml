@@ -1,0 +1,154 @@
+id: openfinance/consentimento
+version: 1
+title: APIs de consentimento do Open Finance
+summary: Crie, consulte e revogue consentimentos de compartilhamento de dados com mTLS, auditoria e limites por participante.
+track: openfinance
+domain: open finance
+tags: [open-finance, consentimento, mtls, rate-limit, auditoria, lgpd]
+difficulties: [pleno, senior]
+
+variables:
+  baselineRps:
+    description: Requisições por segundo das instituições participantes
+    default: 500
+    step: 50
+    ranges: { pleno: [200, 500], senior: [500, 1200] }
+
+narrative: |
+  O Banco Aurora é transmissor de dados no Open Finance: outras instituições (receptoras) pedem consentimentos para
+  acessar dados dos clientes do Aurora, consultam o status desses consentimentos antes de cada chamada e os clientes
+  podem revogá-los pelo app a qualquer momento. São {{ baselineRps | n0 }} requisições por segundo das participantes.
+
+  As participantes se autenticam por mTLS. Cada criação e revogação precisa de trilha de auditoria imutável (LGPD e
+  regras do ecossistema), e os dados não saem do Brasil. Uma participante com bug pode disparar muito mais chamadas do
+  que deveria.
+
+useCases:
+  - id: UC-1
+    name: Criar consentimento
+    description: A receptora pede um consentimento para um cliente.
+    entryClient: client.partner
+    requiredCapabilities:
+      - { capability: authenticate, description: "mTLS da participante." }
+      - { capability: idempotency-check, description: "A mesma criação repetida não gera dois consentimentos." }
+      - { capability: durable-write, before: respond }
+      - { capability: audit-log, description: "Toda criação entra na trilha de auditoria." }
+  - id: UC-2
+    name: Consultar consentimento
+    description: A receptora confere o status antes de acessar os dados.
+    entryClient: client.partner
+    requiredCapabilities:
+      - { capability: authenticate }
+  - id: UC-3
+    name: Revogar consentimento
+    description: O cliente revoga pelo app; a revogação vale imediatamente.
+    entryClient: client.mobile
+    requiredCapabilities:
+      - { capability: authenticate }
+      - { capability: durable-write, before: respond }
+      - { capability: audit-log }
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 0.15, payloadKb: 3, computeCostMs: { p50: 3, p99: 10 } }
+    UC-2: { share: 0.8, payloadKb: 1, computeCostMs: { p50: 1, p99: 4 } }
+    UC-3: { share: 0.05, payloadKb: 1, computeCostMs: { p50: 2, p99: 6 } }
+  cacheability: { UC-2: 0.7 }
+  dailyPattern: { peakHoursPerDay: 4, peakMultiplier: 2 }
+  storedGb: 150
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Dia normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 30s, warmup: 10s } }
+    - id: pico
+      name: Pico de uso (3x)
+      kind: load
+      visibility: public
+      load: { profile: ramp, fromRps: "{{ baselineRps }}", toRps: "{{ baselineRps * 3 }}", rampFor: 10s, holdFor: 30s, warmup: 10s }
+    - id: az-outage
+      name: Queda de uma zona
+      kind: chaos
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: zone-outage, zone: c, at: 12s, for: 15s } ]
+    - id: repeticoes
+      name: Repetições das participantes
+      kind: integrity
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: client-retry, onTimeoutMs: 500, sameIdempotencyKey: true } ]
+  slos:
+    - { id: SLO-1, useCase: UC-2, metric: latency.p99, max: 200ms, scenarios: [baseline, pico], description: "consulta em até 200 ms (p99)" }
+    - { id: SLO-2, useCase: UC-2, metric: success-rate, min: 99.9%, scenarios: [baseline, pico, az-outage], description: "consulta com 99,9% de sucesso" }
+    - { id: SLO-3, useCase: UC-1, metric: success-rate, min: 99.9%, scenarios: [baseline, pico, az-outage], description: "criação com 99,9% de sucesso" }
+    - { id: SLO-4, useCase: UC-1, metric: async-completion.p95, max: 10s, scenarios: [baseline], description: "auditoria gravada em até 10 s (p95)" }
+    - { id: SLO-5, metric: duplicate-effects, max: 0, scenarios: [repeticoes], description: "nenhum consentimento duplicado" }
+
+constraints:
+  budgetUsdMonth: "{{ round(5000 + baselineRps * 25) }}"
+  dataResidencyBrazil: true
+  compliance: [lgpd, bacen-4893]
+  requireEncryptionAtRest: true
+  requireAuditLog: true
+
+competencies: [seguranca, consistencia, resiliencia]
+
+hints:
+  - { level: 1, text: "Quem se autentica aqui são instituições, não pessoas. Como o gateway sabe qual participante está chamando?" }
+  - { level: 2, text: "A consulta de status é 80% do tráfego e precisa ser rápida. O que pode sair de memória sem risco?" }
+  - { level: 3, text: "mTLS e limite por participante no gateway, escrita durável com chave de idempotência e auditoria WORM via outbox." }
+
+clarifications:
+  - question: Uma revogação pode demorar para valer?
+    keywords: [revogação, imediata, cache]
+    answer: Não. Depois de revogado, o consentimento não pode mais ser aceito. Cuidado com o TTL de qualquer cache de status.
+
+reference:
+  rationale: >-
+    O gateway valida o mTLS e limita as chamadas por participante; o serviço de consentimentos grava num banco de
+    documentos regional com escrita condicional (a chave de idempotência evita duplicidade), e cada criação ou revogação
+    sai por outbox para um consumidor idempotente que grava a trilha WORM. A consulta usa cache de TTL curto, invalidado
+    na revogação.
+  nodes:
+    - { id: tpp, component: client.partner, label: Instituição receptora }
+    - { id: app, component: client.mobile, label: App do cliente }
+    - { id: waf, archetype: edge.waf, label: WAF }
+    - { id: gw, archetype: edge.api-gateway, label: API de consentimentos, config: { auth: mtls, waf: true, throttle: { rps: "{{ baselineRps * 6 }}", burst: "{{ baselineRps * 3 }}" } } }
+    - id: svc
+      archetype: compute.service
+      label: consentimentos-service
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 150)) }}", max: "{{ max(6, ceil(baselineRps / 50)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - { id: db, archetype: data.document, label: consentimentos, config: { partitionKey: consentimentoId } }
+    - { id: cache, archetype: data.cache, label: cache-status, config: { nodes: 2, replicas: 1, multiAz: true, zones: [a, b], ttlSeconds: 30 } }
+    - { id: events, archetype: messaging.queue, label: eventos-consentimento, config: { dlq: { enabled: true, maxReceiveCount: 5 }, observability: { alarms: true } } }
+    - id: auditor
+      archetype: compute.function
+      label: auditoria
+      config:
+        reservedConcurrency: 300
+        idempotency: { enabled: true, storeNodeId: dedupe }
+        observability: { metrics: true, logs: true, tracing: true }
+    - { id: dedupe, archetype: data.key-value, label: dedupe-auditoria }
+    - { id: audit, archetype: data.object-storage, label: trilha-auditoria, config: { objectLock: true, versioning: true } }
+  edges:
+    - { id: e01, from: tpp, to: waf, config: { idempotencyKey: true } }
+    - { id: e02, from: waf, to: gw }
+    - { id: e03, from: gw, to: svc, config: { timeoutMs: 190 } }
+    - { id: e04, from: svc, to: db, config: { ops: [ { op: conditional-write, count: 1 } ] } }
+    - { id: e05, from: svc, to: events, config: { delivery: outbox } }
+    - { id: e06, from: events, to: auditor, config: { batchSize: 10 } }
+    - { id: e07, from: auditor, to: dedupe, config: { ops: [ { op: conditional-write, count: 1 } ] } }
+    - { id: e08, from: auditor, to: audit, config: { ops: [ { op: write, count: 1 } ] } }
+    - { id: e09, from: svc, to: cache, config: { ops: [ { op: read, count: 1 } ] } }
+    - { id: e10, from: svc, to: db, config: { trigger: on-cache-miss, triggerOf: e09, ops: [ { op: read, count: 1 } ] } }
+    - { id: e11, from: app, to: waf }
+    - { id: e12, from: svc, to: cache, config: { ops: [ { op: write, count: 1 } ] } }
+  flows:
+    UC-1: [e01, e02, e03, e04, e05, e06, e07, e08]
+    UC-2: [e01, e02, e03, e09, e10]
+    UC-3: [e11, e02, e03, e04, e12, e05, e06, e07, e08]

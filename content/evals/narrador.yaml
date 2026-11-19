@@ -1,0 +1,9 @@
+# Spike S4 — narrador. A referência de cada semente é degradada (uma instância de cada serviço, numa zona só) e
+# avaliada pelo motor; o narrador comenta a revisão e só passa se citar números que estão nela.
+cases:
+  - seed: pix/consulta-dict
+    difficulty: pleno
+  - seed: pix/envio-pix
+    difficulty: senior
+  - seed: cartoes/autorizacao
+    difficulty: senior

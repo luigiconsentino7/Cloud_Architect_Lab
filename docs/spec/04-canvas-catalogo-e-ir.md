@@ -70,6 +70,89 @@ type Interaction =
 - Cada inserção gera um `componentId` novo; copiar e colar gera IDs novos (o app reescreve o `customData` no evento de colagem).
 - A paleta mostra só os serviços do provedor da tentativa. Um serviço de outro provedor colado na cena vira diagnóstico `IR005`, com o equivalente sugerido.
 
+## Integração com o Angular
+
+O app é Angular; o Excalidraw é um componente React. A integração é uma **ilha React** com uma fronteira só:
+
+```mermaid
+flowchart LR
+    subgraph NG["Angular"]
+        PAL["Paleta"] --> AD["CanvasAdapter<br/>serviço com signals"]
+        INS["Inspector"] <--> AD
+        PROB["Problemas e fluxos"] <--> AD
+        HOST["ExcalidrawHostComponent"]
+    end
+    subgraph RE["Ilha React"]
+        EX["Excalidraw"]
+    end
+    HOST -->|"createRoot + render"| EX
+    EX -->|"onChange, excalidrawAPI"| AD
+    AD -->|"updateScene, scrollToContent"| EX
+```
+
+- **Montagem:** um componente Angular cria a raiz React no próprio elemento e a desmonta ao ser destruído. Sem JSX (usa `createElement`), então o build do Angular CLI não muda.
+- **Fora da detecção de mudanças:** o Excalidraw dispara `onChange` a cada movimento do ponteiro. Com o Angular zoneless, só a atualização de signals agenda renderização; se o projeto usar zone.js, a ilha roda em `runOutsideAngular` e o adaptador reentra na zona só para atualizar a interface.
+- **Adaptador como única fronteira:** nenhum outro componente conhece o Excalidraw. Trocar de canvas no futuro é reimplementar o adaptador.
+- **Eventos filtrados:** o adaptador ignora mudanças que não alteram a cena (`getSceneVersion`), publica a seleção só quando ela muda e aplica debounce: 300 ms para a validação ao vivo, 2 s para o autosave (servidor + rascunho local no IndexedDB).
+- **Paleta → canvas:** a paleta (Angular) usa arrastar e soltar do HTML5; no drop, o adaptador converte as coordenadas com `viewportCoordsToSceneCoords` e insere o grupo do componente.
+- **Carregamento sob demanda:** a rota do workspace usa `loadComponent`, então React, ReactDOM e Excalidraw só são baixados ao abrir o canvas.
+- **Assets e estilo:** fontes do Excalidraw copiadas para `assets/excalidraw/` (`window.EXCALIDRAW_ASSET_PATH`) e CSS do pacote nos `styles` do `angular.json`; tema claro/escuro sincronizado com o app; `UIOptions` esconde as ações que o app substitui (abrir e salvar arquivo).
+
+```ts
+// web/src/app/workspace/canvas/excalidraw-host.component.ts (esboço)
+import { Component, ElementRef, NgZone, OnDestroy, afterNextRender, inject, input, viewChild } from '@angular/core';
+import { createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { Excalidraw } from '@excalidraw/excalidraw';
+
+@Component({
+  selector: 'lab-excalidraw-host',
+  template: `<div #host class="h-full w-full"></div>`,
+})
+export class ExcalidrawHostComponent implements OnDestroy {
+  readonly initialScene = input.required<LabScene>();
+  private readonly host = viewChild.required<ElementRef<HTMLDivElement>>('host');
+  private readonly zone = inject(NgZone);
+  private readonly canvas = inject(ExcalidrawCanvasAdapter);
+  private root?: Root;
+
+  constructor() {
+    afterNextRender(() =>
+      this.zone.runOutsideAngular(() => {
+        this.root = createRoot(this.host().nativeElement);
+        this.root.render(createElement(Excalidraw, {
+          initialData: this.initialScene(),
+          excalidrawAPI: (api) => this.canvas.attach(api),
+          onChange: (elements, appState) => this.canvas.onSceneChange(elements, appState),
+        }));
+      }),
+    );
+  }
+
+  ngOnDestroy(): void {
+    this.root?.unmount();
+    this.canvas.detach();
+  }
+}
+```
+
+```ts
+// A única API do canvas que o resto do workspace enxerga.
+// Na rota do workspace: { provide: CanvasAdapter, useExisting: ExcalidrawCanvasAdapter }
+export abstract class CanvasAdapter {
+  abstract readonly selection: Signal<readonly string[]>;   // componentIds e connectionIds selecionados
+  abstract readonly sceneVersion: Signal<number>;
+  abstract insertComponent(catalogId: string, at: { clientX: number; clientY: number }): string;
+  abstract updateComponentConfig(componentId: string, config: Record<string, unknown>): void;
+  abstract setInteraction(connectionId: string, interaction: Interaction): void;
+  abstract highlight(irIds: readonly string[]): void;        // resolve pelo sourceMap da IR
+  abstract showFlow(steps: readonly string[]): void;         // selos numerados nas setas
+  abstract exportScene(): LabScene;
+}
+```
+
+O adaptador é testado com uma API do Excalidraw falsa (unidade) e o canvas real é coberto pelos testes E2E com Playwright.
+
 ## Conexões
 
 ### Inferência da interação

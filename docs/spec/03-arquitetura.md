@@ -21,7 +21,6 @@ flowchart LR
     REPO -->|carregado na inicialização| APP
     APP -.->|opcional| OLL["Ollama<br/>modelo aberto local"]
     APP -.->|opcional, pago| ANT["Claude API"]
-    CF["Cloudflare Tunnel + Access"] -.->|"opcional, acesso remoto"| APP
 ```
 
 ## Processo e componentes
@@ -29,7 +28,7 @@ flowchart LR
 ```mermaid
 flowchart TB
     subgraph PC["Seu computador"]
-        SPA["SPA React + TypeScript<br/>Excalidraw, TanStack Query, SignalR"]
+        SPA["SPA Angular + TypeScript<br/>Excalidraw como ilha React, SignalR"]
         subgraph PROC["Processo .NET 10 (ASP.NET Core)"]
             API["API REST + hub SignalR<br/>serve a SPA na mesma origem"]
             JOBS["Worker em background<br/>Channel + tabela de jobs"]
@@ -56,7 +55,7 @@ flowchart TB
 
 | Módulo | Responsabilidade | Principais entidades | Publica |
 |---|---|---|---|
-| Profile | Perfil local, preferências (provedor padrão, domínios, idioma), identidade remota opcional | Profile | — |
+| Profile | Perfil local e preferências (provedor padrão, domínios, idioma) | Profile | — |
 | Conversations | Conversas de novo desafio e do entrevistador; streaming | Conversation, Message | — |
 | Challenges | Biblioteca de sementes, busca, variação procedural, personalização por IA, ponte manual, recomendação | Challenge | ChallengeCreated |
 | Design | Tentativas, rascunhos, snapshots, compilação cena → IR, fluxos | Attempt, DiagramSnapshot | AttemptSubmitted |
@@ -81,7 +80,7 @@ Bibliotecas compartilhadas, sem estado próprio:
 CloudArchitectLab.sln
 ├─ src/
 │  ├─ Lab.App/                  # host único: endpoints, SignalR, worker, serve a SPA
-│  ├─ Lab.AppHost/              # opcional: Aspire (app + Vite + Ollama + dashboard OTel)
+│  ├─ Lab.AppHost/              # opcional: Aspire (app + ng serve + Ollama + dashboard OTel)
 │  ├─ Modules/
 │  │  ├─ Lab.Profile/
 │  │  ├─ Lab.Conversations/
@@ -104,7 +103,7 @@ CloudArchitectLab.sln
 │  ├─ rules/                    # por quê, como corrigir, trade-offs, follow-ups e links de cada regra
 │  └─ prompts/                  # prompts versionados dos modos com IA
 ├─ schemas/                     # JSON Schemas: challenge, catalog, rule, ir, review
-├─ web/                         # SPA React + TypeScript (Vite)
+├─ web/                         # SPA Angular (Angular CLI)
 ├─ .claude/skills/              # skills do Claude Code para autoria (ver 06)
 ├─ tests/                       # ver 09
 └─ docs/spec/
@@ -122,13 +121,17 @@ CloudArchitectLab.sln
 | Conteúdo | YAML (YamlDotNet) validado por JSON Schema (JsonSchema.Net) | Recarregável em desenvolvimento |
 | IA local | `IChatClient` (Microsoft.Extensions.AI) implementado pelo OllamaSharp | Saída estruturada por JSON Schema |
 | IA paga (opt-in) | SDK oficial `Anthropic` (NuGet) | Ver [06 — IA](06-ia.md) |
-| Frontend | React 19, TypeScript, Vite, TanStack Router + Query, Zustand, Tailwind CSS + shadcn/ui | |
-| Canvas | `@excalidraw/excalidraw` (MIT) | Fontes e assets servidos localmente (`EXCALIDRAW_ASSET_PATH`), sem CDN externa |
-| Gráficos | Apache ECharts | Séries densas e replay |
-| Cliente tempo real | `@microsoft/signalr` | |
-| Tipos do cliente | Gerados do OpenAPI (openapi-typescript) | Frontend sem regra de negócio que vale nota |
+| Frontend | Angular (versão atual): componentes standalone, signals, detecção de mudanças zoneless, Angular CLI | Sua escolha ([ADR-002](#adr-002--angular-com-o-excalidraw-como-ilha-react)) |
+| UI | Angular Material + CDK; Tailwind CSS para layout | CDK também para arrastar da paleta e para painéis redimensionáveis |
+| Estado | Signals + serviços; NgRx SignalStore no workspace | Rascunho, seleção, diagnósticos e fluxos |
+| Canvas | `@excalidraw/excalidraw` (MIT) como ilha React dentro de um componente Angular | Carregado sob demanda; assets servidos localmente (`EXCALIDRAW_ASSET_PATH`), sem CDN externa; ver [04](04-canvas-catalogo-e-ir.md#integração-com-o-angular) |
+| Inspector | ngx-formly com suporte a JSON Schema | Formulários gerados do `configSchema` do catálogo |
+| Gráficos | Apache ECharts via ngx-echarts | Séries densas e replay |
+| Chat | ngx-markdown, com sanitização | Respostas do entrevistador e textos curados |
+| Cliente tempo real | `@microsoft/signalr` num serviço Angular | Eventos expostos como signals |
+| Cliente da API | Serviços e modelos gerados do OpenAPI (ng-openapi-gen) | Frontend sem regra de negócio que vale nota |
 | Observabilidade | OpenTelemetry; Aspire Dashboard opcional em desenvolvimento | |
-| Testes | xUnit v3, Shouldly, Verify, CsCheck, ArchUnitNET, Vitest, Playwright | Ver [09](09-qualidade-seguranca-operacao.md) |
+| Testes | xUnit v3, Shouldly, Verify, CsCheck, ArchUnitNET, Vitest (Angular CLI) + Angular Testing Library, Playwright | Ver [09](09-qualidade-seguranca-operacao.md) |
 | Empacotamento | `dotnet publish` como executável único (Windows, macOS, Linux) com a SPA embutida | |
 | CI | GitHub Actions dentro da cota gratuita | |
 
@@ -168,25 +171,17 @@ sequenceDiagram
 
 ## Execução e hospedagem
 
-### Modo padrão: local
+### Modo padrão: local, só no desktop
 
-- `dotnet run --project src/Lab.App` em desenvolvimento, ou o executável único publicado. Abre em `http://localhost:5080`.
-- Escuta só em `127.0.0.1`; sem login. O `Host` das requisições é validado (só `localhost`/`127.0.0.1`) para bloquear DNS rebinding.
-- Dados em uma pasta do usuário (ex.: `~/.cloud-architect-lab/lab.db`). Backup diário automático com 7 cópias; exportação/importação em JSON.
+- **No uso do dia a dia:** o executável único sobe o servidor e abre o navegador padrão em `http://localhost:5080`.
+- **Em desenvolvimento:** `dotnet run --project src/Lab.App` para o backend e `ng serve` para o Angular, com `proxy.conf.json` encaminhando `/api` e `/hubs` (WebSocket) para o backend — ou os dois juntos pelo `Lab.AppHost` (Aspire). No build de produção, `ng build` gera os arquivos estáticos que o app .NET serve, com fallback para `index.html`.
+- Escuta só em `127.0.0.1`; sem login. As proteções do localhost (validação do `Host` contra DNS rebinding, header próprio contra CSRF) estão em [09](09-qualidade-seguranca-operacao.md#segurança).
+- Dados numa pasta do usuário (ex.: `%APPDATA%\CloudArchitectLab\` no Windows, `~/.local/share/cloud-architect-lab/` no Linux). Backup diário automático com 7 cópias; exportação/importação em JSON.
 - Se o Ollama estiver rodando com o modelo configurado, o modo `auto` liga o chat com IA local.
 
-### Acesso remoto (opcional): Cloudflare Tunnel + Access
+### Acesso remoto: fora do escopo por enquanto
 
-| Peça | Papel | Custo |
-|---|---|---|
-| `cloudflared` (Cloudflare Tunnel) | Publica o app local sem abrir portas no roteador | Grátis |
-| Cloudflare Access (Zero Trust, plano Free) | Exige login (ex.: código por e-mail) antes de qualquer requisição chegar ao app | Grátis |
-| Domínio gerenciado no Cloudflare | Endereço fixo, ex.: `lab.seudominio.com` | ~US$ 10/ano — o único custo possível, e opcional |
-| Seu computador ligado | Onde o app roda de fato | Energia |
-
-- Com `RemoteMode=true`, o app só aceita requisições com o header `Cf-Access-Jwt-Assertion` válido (assinatura conferida nas chaves públicas do seu time no Access). Defesa em profundidade: mesmo com o túnel mal configurado, o app não fica aberto.
-- *Quick tunnels* (`*.trycloudflare.com`) são grátis e dispensam domínio, mas são temporários e não têm Access: **não usar** para expor o app.
-- Alternativa sem domínio: Tailscale (gratuito no plano pessoal), que exige o app cliente em cada dispositivo.
+Decisão de 15/11/2026: uso só no desktop. Se um dia você quiser abrir pelo celular, o caminho gratuito já está mapeado: Cloudflare Tunnel (publica o app local sem abrir portas no roteador) + Cloudflare Access (login na frente), ambos sem custo, mais um domínio de ~US$ 10/ano para ter endereço fixo. O app ganharia um `RemoteMode` que só aceita requisições com o JWT do Access. *Quick tunnels* (`*.trycloudflare.com`) não servem: são temporários e não têm Access.
 
 ### Por que o backend não roda no Cloudflare gratuito
 
@@ -214,12 +209,12 @@ Custos dessa opção: download do runtime .NET (alguns MB, depois em cache), sim
 - **Alternativas:** API e worker em processos separados (útil com muitos usuários; aqui só adiciona operação); microsserviços.
 - **Consequências:** `dotnet run` e pronto; testes de arquitetura garantem as fronteiras; separar o worker no futuro é localizado.
 
-### ADR-002 — React + TypeScript (em vez de Blazor)
+### ADR-002 — Angular, com o Excalidraw como ilha React
 
-- **Contexto:** a tela principal é um canvas estilo Excalidraw, e o Excalidraw é um componente React. Chat e dashboards seriam viáveis em qualquer stack.
-- **Decisão:** React 19 + TypeScript + Vite, servido pelo próprio app .NET.
-- **Alternativas:** (a) Blazor com o Excalidraw via interop JS ("ilha React"): mantém C# na UI, mas cria duas fontes de estado e interop em cada evento do canvas; (b) Blazor + Blazor.Diagrams (MIT): 100% .NET, mas sem a experiência de desenho livre pedida; (c) Angular: sem vantagem para o canvas.
-- **Consequências:** duas linguagens. Mitigação: tipos TypeScript gerados do OpenAPI e toda regra que vale nota no backend.
+- **Contexto:** você escolheu Angular (15/11/2026). A tela principal é um canvas estilo Excalidraw, e o Excalidraw é um componente React; o resto do app (chat, painéis, resultados, gamificação) é natural em Angular.
+- **Decisão:** Angular (standalone, signals, zoneless) no app inteiro; o Excalidraw roda como uma "ilha" React montada por um único componente Angular, atrás de um adaptador tipado (`CanvasAdapter`). Detalhes em [04](04-canvas-catalogo-e-ir.md#integração-com-o-angular).
+- **Alternativas:** (a) React no app inteiro: integração direta com o Excalidraw, mas não é a stack escolhida; (b) Blazor com o Excalidraw via interop JS: duas linguagens no navegador e interop a cada evento do canvas; (c) um editor de diagramas agnóstico (JointJS, draw.io embutido): perderia a experiência de desenho livre pedida.
+- **Consequências:** React e ReactDOM entram só no chunk do workspace, carregado sob demanda; nenhuma outra parte do app conhece o Excalidraw; trocar de canvas no futuro é reimplementar o adaptador. Toda regra que vale nota continua no backend.
 
 ### ADR-003 — Canvas semântico com Excalidraw
 
@@ -249,7 +244,7 @@ Custos dessa opção: download do runtime .NET (alguns MB, depois em cache), sim
 ### ADR-007 — IA plugável com custo zero; Claude Code para autoria
 
 - **Contexto:** requisito de custo zero; o plano Pro não pode ser backend de aplicação (ver [06](06-ia.md)).
-- **Decisão:** (a) sementes, soluções de referência, dicas e textos das regras são criados em tempo de autoria com o Claude Code e validados pelo motor; (b) em execução, portas por papel com adaptadores `none` (padrão), `ollama` (local, grátis) e `anthropic` (Claude API, opt-in com teto de gasto).
+- **Decisão:** (a) sementes, soluções de referência, dicas e textos das regras são criados em tempo de autoria com o Claude Code e validados pelo motor; (b) em execução, portas por papel com adaptadores `none` (sempre disponível), `ollama` (local, grátis) e `anthropic` (Claude API, opt-in com teto de gasto). Decisão de 15/11/2026: começa com `ollama` + `none`; o adaptador `anthropic` e a integração com o Claude Desktop via MCP ficam para o futuro.
 - **Alternativas:** Claude API como padrão (melhor qualidade, ~US$ 9/mês estimados); free tiers de outras APIs de LLM (limites e termos variáveis); automatizar o Claude Code ou a assinatura a partir do backend (não é o caminho suportado pela Anthropic — descartado).
 - **Consequências:** o app nunca depende de IA para funcionar; a qualidade da conversa em execução depende do modelo local disponível.
 
@@ -258,18 +253,18 @@ Custos dessa opção: download do runtime .NET (alguns MB, depois em cache), sim
 - **Decisão:** `Channel<T>` + `BackgroundService`; tabela `jobs` no SQLite para retomar após reinício; resultados de etapa gravados por `(evaluationId, etapa)`, então reexecutar é seguro.
 - **Alternativas:** Hangfire (storage e dashboard próprios), Quartz.NET, broker externo.
 
-### ADR-009 — Local-first; acesso remoto por Cloudflare Tunnel + Access
+### ADR-009 — Local-first, só no desktop
 
-- **Decisão:** o app roda na máquina do usuário; acesso remoto opcional por Tunnel + Access.
-- **Alternativas:** nuvem com free tier (exige cartão, risco de cobrança); Cloudflare Containers (plano pago); Tailscale (grátis, sem domínio, exige cliente em cada dispositivo).
-- **Consequências:** para acesso remoto, o computador precisa estar ligado; nenhum dado sai da máquina sem opt-in.
+- **Decisão:** o app roda na sua máquina e é usado só nela (15/11/2026). Sem túnel, sem domínio, sem nuvem.
+- **Alternativas:** Cloudflare Tunnel + Access (grátis, mas exige domínio para endereço fixo; fica mapeado para o futuro); Tailscale (grátis, exige cliente em cada dispositivo); nuvem com free tier (exige cartão, risco de cobrança); Cloudflare Containers (plano pago).
+- **Consequências:** custo zero absoluto e nenhum dado sai da máquina sem opt-in; abrir pelo celular exigirá uma decisão futura.
 
 ### ADR-010 — Motor puro e compatível com WebAssembly
 
 - **Decisão:** bibliotecas do motor sem I/O, sem relógio do sistema, sem `Random` global e sem reflection dinâmica (amigáveis a trimming e AOT); a partir da Fase 2, o CI também executa os testes do motor em `browser-wasm`.
 - **Motivo:** mantém aberta a versão estática gratuita no Cloudflare Pages e permite validar desenhos no próprio navegador.
 
-### ADR-011 — Autenticação mínima
+### ADR-011 — Sem autenticação, com o localhost protegido
 
-- **Decisão:** local = sem login (só loopback); remoto = Cloudflare Access na frente + validação do JWT do Access no app.
-- **Alternativas:** ASP.NET Core Identity com passkeys (.NET 10), se um dia houver hospedagem sem Access; OIDC com Google ou GitHub.
+- **Decisão:** sem login, porque o app só escuta em loopback e só você o usa. Em troca, o localhost é protegido contra os ataques que valem para qualquer app local: validação do `Host` (DNS rebinding) e header próprio + `Origin` nas requisições que alteram estado (CSRF a partir de sites abertos no navegador).
+- **Alternativas:** Cloudflare Access na frente ou ASP.NET Core Identity com passkeys (.NET 10), se um dia houver acesso remoto.

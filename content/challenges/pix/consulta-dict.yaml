@@ -1,0 +1,135 @@
+id: pix/consulta-dict
+version: 1
+title: Consulta de chave PIX com cache
+summary: Responda consultas de chave PIX em milissegundos sem estourar o limite de consultas do DICT.
+track: pix
+domain: pagamentos instantâneos
+tags: [pix, dict, cache-aside, rate-limit, latencia]
+difficulties: [junior, pleno, senior]
+
+variables:
+  baselineRps:
+    description: Consultas de chave por segundo num dia normal
+    default: 800
+    step: 50
+    ranges: { junior: [200, 400], pleno: [400, 900], senior: [900, 1600] }
+
+twists:
+  - id: dict-instavel
+    title: DICT instável
+    description: O DICT do Banco Central fica lento por alguns segundos durante o teste.
+    minDifficulty: pleno
+    ops:
+      - op: append
+        path: testPlan.scenarios
+        value:
+          id: dict-lento
+          name: DICT lento
+          kind: chaos
+          visibility: hidden
+          load: { ref: baseline }
+          faults: [ { type: latency-injection, target: "external:dict", addMs: { p50: 300, p99: 1200 }, at: 10s, for: 15s } ]
+      - { op: append, path: "testPlan.slos[SLO-2].scenarios", value: dict-lento }
+
+narrative: |
+  Antes de todo PIX, o app da Carteira Ágil consulta a chave do recebedor (CPF, e-mail, celular ou aleatória) para mostrar
+  o nome e o banco de destino. São {{ baselineRps | n0 }} consultas por segundo num dia normal e quatro vezes mais na
+  Black Friday.
+
+  As consultas vão ao DICT, o diretório de chaves do Banco Central, que limita quantas consultas cada participante pode
+  fazer por segundo. A maioria das pessoas paga sempre para as mesmas chaves.
+
+useCases:
+  - id: UC-1
+    name: Consultar chave PIX
+    description: Devolve nome e instituição do dono da chave.
+    entryClient: client.mobile
+    requiredCapabilities:
+      - { capability: authenticate, description: "Só cliente autenticado consulta chaves." }
+      - { capability: read-from-cache, description: "Chaves consultadas há pouco saem do cache." }
+      - { capability: external-call, target: "external:dict", description: "Chaves desconhecidas são consultadas no DICT." }
+
+externalSystems:
+  - id: "external:dict"
+    name: DICT (BACEN)
+    description: Diretório de Identificadores de Contas Transacionais
+    latency: { p50: 40ms, p99: 150ms }
+    availability: 0.9995
+    rateLimitRps: "{{ round(baselineRps * 0.8) }}"
+    idempotent: true
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 1, payloadKb: 1, computeCostMs: { p50: 1, p99: 4 } }
+  cacheability: { UC-1: 0.85 }
+  dailyPattern: { peakHoursPerDay: 3, peakMultiplier: 2 }
+  storedGb: 20
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Dia normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 30s, warmup: 10s } }
+    - id: black-friday
+      name: Black Friday (4x)
+      kind: load
+      visibility: public
+      load: { profile: ramp, fromRps: "{{ baselineRps }}", toRps: "{{ baselineRps * 4 }}", rampFor: 15s, holdFor: 30s, warmup: 10s }
+    - id: az-outage
+      name: Queda de uma zona
+      kind: chaos
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: zone-outage, zone: a, at: 12s, for: 15s } ]
+  slos:
+    - { id: SLO-1, useCase: UC-1, metric: latency.p99, max: 300ms, scenarios: [baseline, black-friday], description: "p99 da consulta até 300 ms" }
+    - { id: SLO-2, useCase: UC-1, metric: success-rate, min: 99.9%, scenarios: [baseline, black-friday, az-outage], description: "sucesso de 99,9%" }
+
+constraints:
+  budgetUsdMonth: "{{ round(2000 + baselineRps * 21) }}"
+  dataResidencyBrazil: true
+  compliance: [lgpd]
+
+competencies: [baixa-latencia, escalabilidade, resiliencia]
+
+hints:
+  - { level: 1, text: "Quantas consultas por segundo o DICT aceita do seu banco? E quantas você recebe no pico?" }
+  - { level: 2, text: "A maioria das consultas é para chaves repetidas. Onde guardar a resposta para não perguntar de novo?" }
+  - { level: 3, text: "Cache-aside: leia do cache; no miss, consulte o DICT e grave no cache com TTL curto." }
+
+clarifications:
+  - question: Posso guardar a resposta do DICT?
+    keywords: [cache, guardar, ttl, armazenar]
+    answer: Sim, por pouco tempo. Considere um TTL de alguns minutos; a chave pode mudar de dono.
+  - question: Qual é o limite do DICT?
+    keywords: [limite, rate, dict, quota]
+    answer: Neste desafio, cerca de 80% da sua carga de base em consultas por segundo; acima disso o DICT recusa.
+
+reference:
+  rationale: >-
+    Contêineres multi-AZ atrás do gateway, dimensionados para o pico (o autoscaling demora mais que a rampa), e
+    cache-aside com réplica em outra zona: 85% das consultas não saem do banco e só o miss vai ao DICT, com timeout
+    curto e circuit breaker. Se um shard do cache cair, a leitura vira miss e vai ao DICT em vez de falhar; com
+    shards espalhados em duas zonas, só metade dos dados faz failover e o DICT aguenta. Assim o pico de 4x cabe no limite.
+  nodes:
+    - { id: app, component: client.mobile, label: App }
+    - { id: waf, archetype: edge.waf, label: WAF }
+    - { id: gw, archetype: edge.api-gateway, label: API de chaves, config: { auth: jwt, waf: true, throttle: { rps: "{{ baselineRps * 8 }}", burst: "{{ baselineRps * 4 }}" } } }
+    - id: svc
+      archetype: compute.service
+      label: chaves-service
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 180)) }}", max: "{{ max(6, ceil(baselineRps / 60)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - { id: cache, archetype: data.cache, label: cache-chaves, config: { nodes: 2, replicas: 1, multiAz: true, zones: [a, b], ttlSeconds: 300 } }
+    - { id: dict, external: "external:dict", label: DICT }
+  edges:
+    - { id: e01, from: app, to: waf }
+    - { id: e02, from: waf, to: gw }
+    - { id: e03, from: gw, to: svc, config: { timeoutMs: 280 } }
+    - { id: e04, from: svc, to: cache, config: { ops: [ { op: read, count: 1 } ] } }
+    - { id: e05, from: svc, to: dict, config: { trigger: on-cache-miss, triggerOf: e04, timeoutMs: 220, circuitBreaker: { enabled: true, errorRateThreshold: 0.5, openMs: 10000 } } }
+    - { id: e06, from: svc, to: cache, config: { trigger: on-cache-miss, triggerOf: e04, ops: [ { op: write, count: 1 } ] } }
+  flows:
+    UC-1: [e01, e02, e03, e04, e05, e06]

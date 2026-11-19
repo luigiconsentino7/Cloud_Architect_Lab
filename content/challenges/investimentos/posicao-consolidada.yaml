@@ -1,0 +1,146 @@
+id: investimentos/posicao-consolidada
+version: 1
+title: Posição consolidada do investidor
+summary: Mostre a carteira inteira do investidor em menos de 250 ms, atualizada pelos eventos da custódia sem perder nenhum.
+track: investimentos
+domain: investimentos
+tags: [cqrs, read-model, cache, eventos, consistencia-eventual]
+difficulties: [pleno, senior]
+
+variables:
+  baselineRps:
+    description: Requisições por segundo (consultas de posição + eventos de custódia)
+    default: 1200
+    step: 100
+    ranges: { pleno: [500, 1200], senior: [1200, 2500] }
+
+narrative: |
+  Na Investe+, a tela "Minha carteira" soma ações, fundos, renda fixa e previdência de cada investidor. Hoje ela consulta
+  cinco sistemas a cada abertura e demora segundos. São {{ baselineRps * 0.75 | n0 }} consultas por segundo, e o triplo
+  no dia em que sai o rendimento dos fundos.
+
+  As posições mudam por eventos da custódia (compras, vendas, proventos, marcação a mercado). A tela pode ficar alguns
+  segundos atrasada, mas nenhum evento pode se perder: uma posição errada gera reclamação e, às vezes, decisão errada.
+
+useCases:
+  - id: UC-1
+    name: Consultar carteira
+    description: Posição consolidada do investidor.
+    entryClient: client.mobile
+    requiredCapabilities:
+      - { capability: authenticate }
+      - { capability: read-from-cache }
+  - id: UC-2
+    name: Aplicar evento de custódia
+    description: Compra, venda ou provento atualiza a posição.
+    entryClient: client.partner
+    requiredCapabilities:
+      - { capability: publish-event }
+      - { capability: durable-write }
+
+workload:
+  baselineRps: "{{ baselineRps }}"
+  mix:
+    UC-1: { share: 0.75, payloadKb: 6, computeCostMs: { p50: 2, p99: 8 } }
+    UC-2: { share: 0.25, payloadKb: 1, computeCostMs: { p50: 2, p99: 6 } }
+  cacheability: { UC-1: 0.6 }
+  dailyPattern: { peakHoursPerDay: 3, peakMultiplier: 2 }
+  storedGb: 400
+
+testPlan:
+  scenarios:
+    - { id: baseline, name: Dia normal, kind: load, visibility: public, load: { profile: constant, rps: "{{ baselineRps }}", duration: 30s, warmup: 10s } }
+    - id: dia-do-rendimento
+      name: Dia do rendimento (3x)
+      kind: load
+      visibility: public
+      load: { profile: ramp, fromRps: "{{ baselineRps }}", toRps: "{{ baselineRps * 3 }}", rampFor: 10s, holdFor: 30s, warmup: 10s }
+    - id: falhas-de-entrega
+      name: Reentregas e crash do consumidor
+      kind: integrity
+      visibility: hidden
+      load: { ref: baseline }
+      faults:
+        - { type: duplicate-delivery, probability: 0.02 }
+        - { type: consumer-crash, probability: 0.01 }
+    - id: az-outage
+      name: Queda de uma zona
+      kind: chaos
+      visibility: hidden
+      load: { ref: baseline }
+      faults: [ { type: zone-outage, zone: b, at: 12s, for: 15s } ]
+  slos:
+    - { id: SLO-1, useCase: UC-1, metric: latency.p99, max: 250ms, scenarios: [baseline, dia-do-rendimento], description: "carteira em até 250 ms (p99)" }
+    - { id: SLO-2, useCase: UC-1, metric: success-rate, min: 99.9%, scenarios: [baseline, dia-do-rendimento, az-outage], description: "sucesso de 99,9%" }
+    - { id: SLO-3, useCase: UC-2, metric: async-completion.p95, max: 10s, scenarios: [baseline, dia-do-rendimento], description: "evento refletido em até 10 s (p95)" }
+    - { id: SLO-4, metric: lost-events, max: 0, scenarios: [falhas-de-entrega, az-outage], description: "nenhum evento perdido" }
+    - { id: SLO-5, metric: duplicate-effects, max: 0, scenarios: [falhas-de-entrega], description: "nenhum evento aplicado duas vezes" }
+
+constraints:
+  budgetUsdMonth: "{{ round(5000 + baselineRps * 24) }}"
+  dataResidencyBrazil: true
+  compliance: [lgpd]
+  requireEncryptionAtRest: true
+
+competencies: [consistencia, mensageria, escalabilidade]
+
+hints:
+  - { level: 1, text: "Consultar cinco sistemas a cada abertura soma a latência de todos. Dá para ter a soma pronta antes da consulta?" }
+  - { level: 2, text: "Se o consumidor cair no meio do processamento, o evento volta para a fila. O que impede de aplicá-lo duas vezes?" }
+  - { level: 3, text: "Modelo de leitura atualizado por eventos (fila com DLQ + consumidor idempotente) e cache na frente da consulta." }
+
+clarifications:
+  - question: Posso mostrar a carteira com alguns segundos de atraso?
+    keywords: [atraso, tempo real, desatualizada]
+    answer: Sim, até 10 segundos (p95) depois do evento da custódia.
+
+reference:
+  rationale: >-
+    Os eventos da custódia entram por uma API, vão para uma fila com DLQ e um consumidor idempotente aplica cada um no
+    modelo de leitura (banco de documentos regional) com escrita condicional pela versão do evento. A consulta lê do
+    cache e, no miss, do modelo de leitura — nunca dos sistemas de origem.
+  nodes:
+    - { id: app, component: client.mobile, label: App }
+    - { id: custody, component: client.partner, label: Custódia }
+    - { id: waf, archetype: edge.waf, label: WAF }
+    - { id: gw, archetype: edge.api-gateway, label: API, config: { auth: jwt, waf: true, throttle: { rps: "{{ baselineRps * 6 }}", burst: "{{ baselineRps * 3 }}" } } }
+    - id: query
+      archetype: compute.service
+      label: carteira-service
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 150)) }}", max: "{{ max(6, ceil(baselineRps / 50)) }}" }
+        vcpu: 2
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true, alarms: true }
+    - { id: cache, archetype: data.cache, label: cache-carteira, config: { nodes: 2, replicas: 1, multiAz: true, zones: [a, b] } }
+    - { id: read, archetype: data.document, label: posicoes, config: { partitionKey: investidorId } }
+    - id: ingest
+      archetype: compute.service
+      label: eventos-api
+      config:
+        instances: { min: "{{ max(3, ceil(baselineRps / 400)) }}", max: "{{ max(6, ceil(baselineRps / 130)) }}" }
+        vcpu: 1
+        zones: [a, b, c]
+        observability: { metrics: true, logs: true, tracing: true }
+    - { id: queue, archetype: messaging.queue, label: eventos-custodia, config: { dlq: { enabled: true, maxReceiveCount: 5 }, observability: { alarms: true } } }
+    - id: projector
+      archetype: compute.function
+      label: projetor-posicoes
+      config:
+        reservedConcurrency: 400
+        idempotency: { enabled: true, storeNodeId: read }
+        observability: { metrics: true, logs: true, tracing: true }
+  edges:
+    - { id: e01, from: app, to: waf }
+    - { id: e02, from: waf, to: gw }
+    - { id: e03, from: gw, to: query, config: { timeoutMs: 240 } }
+    - { id: e04, from: query, to: cache, config: { ops: [ { op: read, count: 1 } ] } }
+    - { id: e05, from: query, to: read, config: { trigger: on-cache-miss, triggerOf: e04, ops: [ { op: read, count: 1 } ] } }
+    - { id: e06, from: custody, to: gw, config: { idempotencyKey: true } }
+    - { id: e07, from: gw, to: ingest, config: { timeoutMs: 400 } }
+    - { id: e08, from: ingest, to: queue }
+    - { id: e09, from: queue, to: projector, config: { batchSize: 10 } }
+    - { id: e10, from: projector, to: read, config: { ops: [ { op: conditional-write, count: 1 } ] } }
+  flows:
+    UC-1: [e01, e02, e03, e04, e05]
+    UC-2: [e06, e07, e08, e09, e10]
