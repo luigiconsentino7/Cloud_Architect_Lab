@@ -29,27 +29,33 @@ Não precisa compilar nada: baixe o zip do seu sistema na versão de teste mais 
 `Lab.App.exe` (Windows) ou o `Lab.App` (Linux e macOS). O passo a passo, o roteiro do que testar e como relatar
 problemas estão em [docs/como-testar.md](docs/como-testar.md).
 
-## Rodar
+## Rodar a partir do código
 
 **Requisitos:** [.NET SDK 10](https://dotnet.microsoft.com/download) (10.0.404 ou mais novo) e
 [Node.js 22](https://nodejs.org) para gerar a interface. O Ollama é opcional.
 
-```bash
-cd web
-npm ci
-npm run build:app
+Um comando gera a interface e sobe o app, que abre no navegador. No PowerShell, na pasta do repositório:
+
+```powershell
+.\app.cmd
 ```
 
+No Linux, macOS ou Git Bash:
+
 ```bash
-dotnet run --project src/Lab.App -c Release
+./app.sh
 ```
+
+Opções do app vão no fim (ex.: `.\app.cmd --Ai:Mode=none`). O script roda `npm ci` e `npm run build:app` em `web/` e
+depois `dotnet run -c Release --no-launch-profile` em `src/Lab.App`.
 
 O app abre em <http://localhost:5080> e só escuta em `localhost`. O banco fica na pasta de dados do usuário
 (`%APPDATA%\CloudArchitectLab` no Windows, `~/Library/Application Support/CloudArchitectLab` no macOS,
 `~/.local/share/cloud-architect-lab` no Linux), com cópia diária (7 dias) e backup antes de cada migration.
 
-**Executável único.** O CI publica, a cada push na `main`, o app inteiro num arquivo só (com o runtime .NET embutido)
-para Windows, Linux e macOS, nos artefatos do workflow. Para gerar localmente, depois do `npm run build:app`:
+**Executável único.** O CI publica, a cada push na `main` (ou disparo manual), o app inteiro num arquivo só (com o
+runtime .NET embutido) para Windows, Linux e macOS, numa pré-release em **Releases**. Para gerar localmente, depois do
+`npm run build:app`:
 
 ```bash
 dotnet publish src/Lab.App -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish/win-x64

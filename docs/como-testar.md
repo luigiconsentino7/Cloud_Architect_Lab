@@ -23,6 +23,30 @@ abre o navegador nele.
 
 A versão aparece no topo da tela, ao lado do nome (`v0.1.0-teste.N (abc1234)`). Cite-a quando relatar um problema.
 
+### Rodar a partir do código (para testar uma branch ou um pull request)
+
+Com o [.NET SDK 10](https://dotnet.microsoft.com/download) e o [Node.js 22](https://nodejs.org) instalados, na pasta
+do repositório, pegue a versão que quer testar e rode o atalho, que gera a interface e abre o app no navegador:
+
+```powershell
+git fetch origin
+```
+
+```powershell
+git checkout claude/friendly-euler-7vg9de
+```
+
+```powershell
+git pull
+```
+
+```powershell
+.\app.cmd
+```
+
+No Linux, macOS ou Git Bash, use `./app.sh`. A versão no topo da tela mostra o commit (`v0.1.0 (abc1234)`): confira
+que é o mesmo do `git log --oneline -1`. Os dados são os mesmos do executável (a pasta da seção 5).
+
 ## 2. IA local (opcional)
 
 O app funciona inteiro sem IA: a busca guiada escolhe o desafio, o entrevistador responde com o conteúdo curado e a
